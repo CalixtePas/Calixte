@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Calixte Verifier</title>
+    <style>
+      body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #f7f8fa; color: #121212; }
+      .app { max-width: 900px; margin: 2rem auto; background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+      textarea { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .row { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; }
+      button { border: 0; background: #0f62fe; color: #fff; padding: .6rem .9rem; border-radius: 8px; cursor: pointer; }
+      button.secondary { background: #525252; }
+      button:disabled { opacity: .6; cursor: not-allowed; }
+      .card { border: 1px solid #ddd; padding: .75rem; border-radius: 8px; margin-top: .75rem; background: #fcfcfc; }
+      .ok { color: #0e7a0d; font-weight: 700; }
+      .warn { color: #9f6000; font-weight: 700; }
+      ul { margin: .25rem 0 .25rem 1rem; }
+      code { background: #f1f3f5; padding: 0 .3rem; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
