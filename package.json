@@ -1,0 +1,14 @@
+{
+  "name": "calixte",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w server & npm run dev -w client & wait",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build -ws --if-present"
+  }
+}
