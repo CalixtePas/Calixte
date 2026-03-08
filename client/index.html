@@ -3,28 +3,54 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Calixte Verifier</title>
+    <title>Calixte - App Bancaire Sécurisée</title>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
     <style>
-      body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #f7f8fa; color: #121212; }
-      .app { max-width: 1000px; margin: 2rem auto; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
-      textarea { width: 100%; min-height: 80px; font-family: ui-monospace, monospace; margin-bottom: 1rem; padding: 0.5rem;}
+      body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #f0f2f5; color: #121212; }
+      .app { max-width: 900px; margin: 2rem auto; background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.05); }
+      
+      /* Typographie et Alignement Icones */
+      h1 { display: flex; align-items: center; gap: 0.5rem; font-size: 1.5rem; color: #1a1a1a; margin-top: 0; }
+      .icon { vertical-align: bottom; font-size: inherit; }
+      
+      /* Boutons */
       .row { display: flex; gap: .75rem; flex-wrap: wrap; margin: 1rem 0; }
-      button { border: 0; background: #0f62fe; color: #fff; padding: .6rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 500; }
-      button.secondary { background: #525252; }
-      button.danger { background: #da1e28; }
+      button { display: flex; align-items: center; gap: 0.5rem; border: 0; background: #0f62fe; color: #fff; padding: .6rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 500; transition: 0.2s; }
+      button:hover { filter: brightness(1.1); }
+      button.secondary { background: #e0e0e0; color: #333; }
+      button.danger { background: #da1e28; color: white; }
       button:disabled { opacity: .5; cursor: not-allowed; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem; }
-      .card { border: 1px solid #e0e0e0; padding: 1.5rem; border-radius: 8px; background: #fcfcfc; }
-      .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; margin-bottom: 1rem; }
-      .alert { padding: 0.75rem; border-radius: 6px; margin: 1rem 0; font-weight: 500; font-size: 0.9rem; }
-      .alert.info { background: #edf5ff; color: #0043ce; border-left: 4px solid #0f62fe; }
-      .alert.warning { background: #fcf4d6; color: #754b00; border-left: 4px solid #f1c21b; }
-      .alert.danger { background: #fff1f1; color: #a2191f; border-left: 4px solid #da1e28; }
-      ul { margin: .5rem 0 .5rem 1.2rem; padding: 0; }
-      code { background: #f1f3f5; padding: 0.1rem .3rem; border-radius: 4px; font-size: 0.9em; }
+      
+      /* Grille Responsive */
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 2rem; }
+      @media (max-width: 768px) {
+        .grid { grid-template-columns: 1fr; } /* Empile les colonnes sur mobile */
+        .app { margin: 0; border-radius: 0; min-height: 100vh; }
+      }
+
+      .card { border: 1px solid #e0e0e0; padding: 1.5rem; border-radius: 12px; background: #fcfcfc; }
+      
+      /* Alertes et Bannières */
+      .alert { display: flex; gap: 0.75rem; align-items: flex-start; padding: 1rem; border-radius: 8px; margin: 1rem 0; font-weight: 500; font-size: 0.95rem; }
+      .alert.info { background: #edf5ff; color: #0043ce; border: 1px solid #d0e2ff; }
+      .alert.warning { background: #fcf4d6; color: #754b00; border: 1px solid #f1c21b; }
+      .alert.danger { background: #fff1f1; color: #a2191f; border: 1px solid #ff8389; }
+      
+      /* Listes */
+      ul { margin: .5rem 0; padding-left: 1.5rem; }
+      li { margin-bottom: 0.25rem; }
+
+      /* Modale (Step-Up) */
+      .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(4px); }
+      .modal { background: white; padding: 2rem; border-radius: 16px; width: 90%; max-width: 400px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); animation: slideUp 0.3s ease-out; }
+      .modal h2 { margin-top: 0; display: flex; align-items: center; gap: 0.5rem; color: #a2191f; }
+      @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+      /* Debug Token (caché par défaut pour faire "vrai") */
+      details { margin-top: 1rem; padding: 1rem; background: #f4f4f4; border-radius: 8px; font-size: 0.85rem; }
+      textarea { width: 100%; min-height: 60px; font-family: monospace; margin-top: 0.5rem; box-sizing: border-box; }
     </style>
     <script>
-      // Injection de configuration pour le déploiement (remplaçable dynamiquement)
       window.ENV = { API_BASE_URL: 'http://localhost:3001/calixte/v1' };
     </script>
   </head>
