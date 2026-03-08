@@ -41,7 +41,8 @@ function evaluateAction(action: string): { decision: Decision; reason: string } 
 
 export function buildServer() {
   const server = createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+const origin = process.env.FRONTEND_ORIGIN || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') return send(res, 200, {});
 
