@@ -2,6 +2,8 @@ import { buildServer } from './app.ts';
 
 const app = buildServer();
 
-app.listen(3001).then(() => {
-  console.log('Calixte server listening on http://localhost:3001');
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
+
+app.listen(PORT).then(() => {
+  console.log(`Calixte server listening on port ${PORT}`);
 });
