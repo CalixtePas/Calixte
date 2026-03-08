@@ -6,18 +6,27 @@
     <title>Calixte Verifier</title>
     <style>
       body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #f7f8fa; color: #121212; }
-      .app { max-width: 900px; margin: 2rem auto; background: white; padding: 1.5rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
-      textarea { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-      .row { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; }
-      button { border: 0; background: #0f62fe; color: #fff; padding: .6rem .9rem; border-radius: 8px; cursor: pointer; }
+      .app { max-width: 1000px; margin: 2rem auto; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+      textarea { width: 100%; min-height: 80px; font-family: ui-monospace, monospace; margin-bottom: 1rem; padding: 0.5rem;}
+      .row { display: flex; gap: .75rem; flex-wrap: wrap; margin: 1rem 0; }
+      button { border: 0; background: #0f62fe; color: #fff; padding: .6rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 500; }
       button.secondary { background: #525252; }
-      button:disabled { opacity: .6; cursor: not-allowed; }
-      .card { border: 1px solid #ddd; padding: .75rem; border-radius: 8px; margin-top: .75rem; background: #fcfcfc; }
-      .ok { color: #0e7a0d; font-weight: 700; }
-      .warn { color: #9f6000; font-weight: 700; }
-      ul { margin: .25rem 0 .25rem 1rem; }
-      code { background: #f1f3f5; padding: 0 .3rem; border-radius: 4px; }
+      button.danger { background: #da1e28; }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem; }
+      .card { border: 1px solid #e0e0e0; padding: 1.5rem; border-radius: 8px; background: #fcfcfc; }
+      .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; margin-bottom: 1rem; }
+      .alert { padding: 0.75rem; border-radius: 6px; margin: 1rem 0; font-weight: 500; font-size: 0.9rem; }
+      .alert.info { background: #edf5ff; color: #0043ce; border-left: 4px solid #0f62fe; }
+      .alert.warning { background: #fcf4d6; color: #754b00; border-left: 4px solid #f1c21b; }
+      .alert.danger { background: #fff1f1; color: #a2191f; border-left: 4px solid #da1e28; }
+      ul { margin: .5rem 0 .5rem 1.2rem; padding: 0; }
+      code { background: #f1f3f5; padding: 0.1rem .3rem; border-radius: 4px; font-size: 0.9em; }
     </style>
+    <script>
+      // Injection de configuration pour le déploiement (remplaçable dynamiquement)
+      window.ENV = { API_BASE_URL: 'http://localhost:3001/calixte/v1' };
+    </script>
   </head>
   <body>
     <div id="root"></div>
