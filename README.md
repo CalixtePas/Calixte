@@ -42,3 +42,17 @@ npm test
 - `GET /jwks`
 - `POST /policy/evaluate`
 - `POST /confirmations/:id/approve`
+## Déploiement
+
+### Backend (Server)
+Prêt pour Render, Railway ou Heroku.
+- **Variables obligatoires / optionnelles** : 
+  - `PORT` (ex: 8080)
+  - `FRONTEND_ORIGIN` (ex: `https://mon-client-calixte.vercel.app`)
+- **Run** : `npm run dev -w server` (ou compiler le TS en amont pour prod).
+
+### Frontend (Client)
+Prêt pour Vercel ou Netlify.
+- **Build** : `npm run build -w client`
+- **Output** : Le dossier `client/dist/` contient les fichiers statiques à déployer.
+- **Configuration** : Éditez la balise `<script> window.ENV = ... </script>` dans `client/index.html` pour pointer vers l'URL de production du backend.
