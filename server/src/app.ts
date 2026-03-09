@@ -25,7 +25,7 @@ async function readBody(req: IncomingMessage): Promise<Json> {
   }
 }
 
-// NOUVEAU : Moteur de règles intelligent (gère les montants)
+// Moteur de règles intelligent (gère les montants)
 function evaluateAction(action: string, amount?: number): { decision: Decision; reason: string } {
   switch (action) {
     case 'ASK_OTP':
@@ -48,16 +48,22 @@ export function buildServer() {
   const server = createServer(async (req, res) => {
     const origin = process.env.FRONTEND_ORIGIN || '*';
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    // On ajoute tous les headers nécessaires pour le temps réel et éviter les blocages CORS
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Connection, X-Accel-Buffering');
+    
     if (req.method === 'OPTIONS') return send(res, 200, {});
 
-    // NOUVEAU : Route Temps Réel (Server-Sent Events)
+    // Route Temps Réel (Server-Sent Events)
     const streamMatch = req.url?.match(new RegExp(`^${PREFIX}/interactions/([^/]+)/stream$`));
     if (req.method === 'GET' && streamMatch) {
       const interaction_id = streamMatch[1];
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
+      
+      // LA LIGNE MAGIQUE POUR RENDER (désactive le buffering Nginx)
+      res.setHeader('X-Accel-Buffering', 'no'); 
+      
       res.write('data: {"type":"CONNECTED"}\n\n');
 
       if (!clients.has(interaction_id)) clients.set(interaction_id, new Set());
