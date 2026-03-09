@@ -25,16 +25,13 @@ async function readBody(req: IncomingMessage): Promise<Json> {
   }
 }
 
-// Moteur de règles intelligent (gère les montants)
-function evaluateAction(action: string, amount?: number): { decision: Decision; reason: string } {
+// Moteur de règles STRICT (Tolérance Zéro pour OTP et Virements)
+function evaluateAction(action: string): { decision: Decision; reason: string } {
   switch (action) {
     case 'ASK_OTP':
-      return { decision: 'DENY', reason: 'OTP requests are blocked as scam indicators.' };
+      return { decision: 'DENY', reason: 'OTP requests are strictly blocked as scam indicators.' };
     case 'WIRE_TRANSFER':
-      if (amount !== undefined && amount <= 50) {
-        return { decision: 'ALLOW', reason: 'Small wire transfers (<50) are allowed automatically.' };
-      }
-      return { decision: 'STEP_UP', reason: 'Large wire transfers require out-of-band confirmation.' };
+      return { decision: 'DENY', reason: 'Wire transfers initiated by caller are strictly forbidden, regardless of amount.' };
     case 'FREEZE_CARD':
       return { decision: 'STEP_UP', reason: 'Card freeze requires out-of-band confirmation.' };
     case 'DISCUSS_CASE':
@@ -48,20 +45,16 @@ export function buildServer() {
   const server = createServer(async (req, res) => {
     const origin = process.env.FRONTEND_ORIGIN || '*';
     res.setHeader('Access-Control-Allow-Origin', origin);
-    // On ajoute tous les headers nécessaires pour le temps réel et éviter les blocages CORS
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Cache-Control, Connection, X-Accel-Buffering');
     
     if (req.method === 'OPTIONS') return send(res, 200, {});
 
-    // Route Temps Réel (Server-Sent Events)
     const streamMatch = req.url?.match(new RegExp(`^${PREFIX}/interactions/([^/]+)/stream$`));
     if (req.method === 'GET' && streamMatch) {
       const interaction_id = streamMatch[1];
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
-      // LA LIGNE MAGIQUE POUR RENDER (désactive le buffering Nginx)
       res.setHeader('X-Accel-Buffering', 'no'); 
       
       res.write('data: {"type":"CONNECTED"}\n\n');
@@ -85,9 +78,10 @@ export function buildServer() {
       const now = Math.floor(Date.now() / 1000);
       interactions.set(interaction_id, { interaction_id, actor_type: body.actor_type, intent: body.intent, audience_ref: body.audience_ref, created_at: Date.now() });
 
+      // On affiche les règles claires (plus de notion de montants)
       const summary = {
-        can: ['DISCUSS_CASE', 'FREEZE_CARD_WITH_STEP_UP', 'WIRE_TRANSFER (<50€)'],
-        cannot: ['ASK_OTP', 'WIRE_TRANSFER (>50€)', 'SHARE_SECRETS']
+        can: ['DISCUSS_CASE', 'FREEZE_CARD_WITH_STEP_UP'],
+        cannot: ['ASK_OTP', 'WIRE_TRANSFER', 'SHARE_SECRETS']
       };
 
       const token = signToken({ iss: 'calixte', sub: interaction_id, aud: body.audience_ref, iat: now, exp: now + 10 * 60, actor_type: body.actor_type, intent: body.intent, summary });
@@ -96,24 +90,22 @@ export function buildServer() {
     }
 
     if (req.method === 'POST' && req.url === `${PREFIX}/policy/evaluate`) {
-      const body = (await readBody(req)) as { interaction_id?: string; action?: string; amount?: number };
+      const body = (await readBody(req)) as { interaction_id?: string; action?: string; };
       if (!body.interaction_id || !body.action) return send(res, 200, { decision: 'DENY', reason: 'missing fields' });
 
       const interaction = interactions.get(body.interaction_id);
       if (!interaction) return send(res, 200, { decision: 'DENY', reason: 'UNVERIFIED' });
 
-      const base = evaluateAction(body.action, body.amount);
+      const base = evaluateAction(body.action);
       
       if (base.decision === 'STEP_UP') {
         const id = randomUUID();
         confirmations.set(id, { id, interaction_id: interaction.interaction_id, status: 'PENDING', created_at: Date.now() });
-        // DIFFUSION TEMPS RÉEL DU STEP UP
-        broadcast(interaction.interaction_id, { type: 'STEP_UP', confirmation_id: id, action: body.action, amount: body.amount });
+        broadcast(interaction.interaction_id, { type: 'STEP_UP', confirmation_id: id, action: body.action });
         return send(res, 200, { ...base, confirmation_id: id });
       }
 
-      // DIFFUSION TEMPS RÉEL (ALLOW OU DENY)
-      broadcast(interaction.interaction_id, { type: base.decision, action: body.action, amount: body.amount });
+      broadcast(interaction.interaction_id, { type: base.decision, action: body.action });
       return send(res, 200, base);
     }
 
@@ -122,7 +114,6 @@ export function buildServer() {
       const confirmation = confirmations.get(id);
       if (!confirmation) return send(res, 404, { error: 'Not found' });
       confirmation.status = 'APPROVED';
-      // NOTIFICATION TEMPS RÉEL : APPROUVÉ
       broadcast(confirmation.interaction_id, { type: 'APPROVED', action_id: id });
       return send(res, 200, { status: 'APPROVED' });
     }
