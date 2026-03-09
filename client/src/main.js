@@ -14,10 +14,12 @@ function App() {
   const [interactionId, setInteractionId] = useState('');
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
+  
+  // NOUVEL ÉTAT : Pour afficher l'alerte d'urgence rouge
+  const [scamAlert, setScamAlert] = useState('');
+  
   const [busy, setBusy] = useState(false);
   const [actionLog, setActionLog] = useState([]);
-  
-  // NOUVEAU : Référence pour garder la connexion temps réel ouverte
   const esRef = useRef(null);
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
@@ -32,6 +34,7 @@ function App() {
     setInteractionId('');
     setPendingConfirmation('');
     setPendingActionName('');
+    setScamAlert('');
   }
 
   async function simulateIncomingCall(actorType) {
@@ -60,19 +63,21 @@ function App() {
       setVerifyMsg('Identité cryptographique confirmée.');
       logAction('✅ Preuve vérifiée en arrière-plan. Affichage du mode sécurisé.');
 
-      // MAGIE TEMPS RÉEL : L'appli se connecte au flux du serveur
       if (esRef.current) esRef.current.close();
       const es = new EventSource(`${API}/interactions/${id}/stream`);
       es.onmessage = (evt) => {
         const data = JSON.parse(evt.data);
         if (data.type === 'STEP_UP') {
-          setPendingActionName(`${data.action} ${data.amount ? '(' + data.amount + '€)' : ''}`);
+          setPendingActionName(`${data.action}`);
           setPendingConfirmation(data.confirmation_id);
           logAction(`🔔 PUSH REÇU : Validation requise pour ${data.action}.`);
         } else if (data.type === 'ALLOW') {
-          logAction(`ℹ️ INFO PUSH : Le conseiller a pu exécuter ${data.action} ${data.amount ? '('+data.amount+'€)' : ''}.`);
+          logAction(`ℹ️ INFO PUSH : Le conseiller a pu exécuter ${data.action}.`);
         } else if (data.type === 'DENY') {
-          logAction(`❌ INFO PUSH : Le serveur a bloqué l'action du conseiller (${data.action}).`);
+          logAction(`❌ INFO PUSH : Le serveur a bloqué l'action interdite (${data.action}).`);
+          
+          // DÉCLENCHEMENT DE L'ALERTE ROUGE
+          setScamAlert(`L'appelant a tenté l'action interdite : ${data.action}.\n\nUn conseiller bancaire n'a JAMAIS l'autorisation de vous demander un code de validation (OTP) ou d'initier un virement, peu importe le montant.\n\n⚠️ Ceci est une fraude avérée. RACCROCHEZ IMMÉDIATEMENT.`);
         }
       };
       esRef.current = es;
@@ -91,17 +96,15 @@ function App() {
     logAction('📞 Appel entrant normal (réseau classique, sans preuve de la banque).');
   }
 
-  // Cette fonction simule l'interface d'administration du conseiller (à distance)
-  async function simulateCallerAction(action, amount) {
+  async function simulateCallerAction(action) {
     if (verified !== true) return;
-    logAction(`[API Conseiller] Tente d'initier : ${action} ${amount ? amount+'€' : ''}`);
+    logAction(`[API Conseiller] Tente d'initier : ${action}`);
     try {
       await fetch(`${API}/policy/evaluate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interaction_id: interactionId, action, amount })
+        body: JSON.stringify({ interaction_id: interactionId, action })
       });
-      // Plus besoin de gérer la modale ici ! Le Server-Sent Event s'en occupe tout seul.
     } catch (err) {
       logAction(`[API Conseiller] Erreur réseau.`);
     }
@@ -168,16 +171,14 @@ function App() {
           ),
           e('div', { className: 'row', style: { flexDirection: 'column' } },
             e('button', { className: 'secondary', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('gavel'), 'Serveur: Bloquer Carte'),
-            // NOUVEAU : Test de l'intelligence artificielle du moteur de règles (Montants)
-            e('button', { className: 'secondary', onClick: () => simulateCallerAction('WIRE_TRANSFER', 15) }, Icon('payments'), 'Serveur: Virement 15€ (Petit)'),
-            e('button', { className: 'secondary', onClick: () => simulateCallerAction('WIRE_TRANSFER', 2000) }, Icon('account_balance'), 'Serveur: Virement 2000€ (Gros)'),
-            e('button', { className: 'secondary', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('gavel'), 'Serveur: Demander OTP')
+            e('button', { className: 'secondary', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('payments'), 'Serveur: Initier un Virement'),
+            e('button', { className: 'secondary', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('password'), 'Serveur: Demander OTP')
           )
         ) : e('p', { style: { fontSize: '0.9rem', color: '#666' } }, 'Impossible d\'interagir avec le serveur sans identité.')
       )
     ),
 
-    // Modale Step-Up
+    // Modale Step-Up (Blocage de carte)
     pendingConfirmation && e('div', { className: 'modal-overlay' },
       e('div', { className: 'modal' },
         e('h2', null, Icon('error'), 'Validation requise'),
@@ -187,6 +188,17 @@ function App() {
         e('div', { className: 'row', style: { justifyContent: 'flex-end', marginTop: '2rem' } },
           e('button', { className: 'secondary', onClick: () => setPendingConfirmation('') }, 'Annuler'),
           e('button', { className: 'danger', onClick: approveAction, disabled: busy }, 'Autoriser')
+        )
+      )
+    ),
+
+    // NOUVELLE MODALE : Scam Alert (Tentative de fraude détectée)
+    scamAlert && e('div', { className: 'modal-overlay' },
+      e('div', { className: 'modal', style: { borderTop: '8px solid #da1e28' } },
+        e('h2', { style: { color: '#da1e28', margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('warning'), 'ALERTE SÉCURITÉ'),
+        e('p', { style: { whiteSpace: 'pre-wrap', fontWeight: '500', lineHeight: '1.5' } }, scamAlert),
+        e('div', { className: 'row', style: { justifyContent: 'center', marginTop: '1.5rem' } },
+          e('button', { className: 'danger', onClick: () => { resetState(); } }, Icon('phone_disabled'), 'Raccrocher et Bloquer l\'appelant')
         )
       )
     ),
