@@ -17,14 +17,12 @@ const RECIPIENTS = [
 function App() {
   const [balance, setBalance] = useState(12450.00);
   const [token, setToken] = useState('');
-  const [verified, setVerified] = useState(null); // null = IDLE, true = VÉRIFIÉ (on a supprimé le 'false')
+  const [verified, setVerified] = useState(null); 
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
   
-  // NOUVEAU : État pour gérer l'affichage de la popup "Contrat de Confiance"
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
   
-  // Navigation Mobile
   const [isTransferPageOpen, setIsTransferPageOpen] = useState(false);
   const [transferAmount, setTransferAmount] = useState(''); 
   const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
@@ -39,6 +37,10 @@ function App() {
   const esRef = useRef(null);
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
+  
+  // Formatage propre du nom de l'appelant
+  const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : 'Conseiller Humain';
+
   const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
   
   const showToast = (msg) => {
@@ -58,7 +60,8 @@ function App() {
   // --- ACTIONS DU SIMULATEUR ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
-    logAction(`Connexion sécurisée avec conseiller en cours...`);
+    const displayActor = actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller Humain';
+    logAction(`Connexion sécurisée avec ${displayActor} en cours...`);
     
     try {
       const resStart = await fetch(`${API}/interactions/start`, {
@@ -78,7 +81,6 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // On déclenche l'ouverture de la popup
       setShowPermissionsPopup(true);
       logAction(`✅ Preuve EdDSA valide. Canal temps réel ouvert.`, 'success');
 
@@ -92,10 +94,10 @@ function App() {
           logAction(`🔔 PUSH DU SERVEUR: Validation client requise pour ${data.action}.`, 'warn');
         } else if (data.type === 'ALLOW') {
           logAction(`ℹ️ PUSH DU SERVEUR: Action autorisée (${data.action}).`);
-          showToast(`Info conseiller : action ${data.action} exécutée.`);
+          showToast(`Info : action ${data.action} exécutée.`);
         } else if (data.type === 'DENY') {
           logAction(`❌ PUSH DU SERVEUR: Action interdite bloquée (${data.action}).`, 'err');
-          setScamAlert(`ALERTE DE SÉCURITÉ\nL'appelant a tenté une action interdite : ${data.action}.\n\nUn vrai conseiller bancaire ne demandera JAMAIS cela. Ceci est une fraude, raccrochez immédiatement.`);
+          setScamAlert(`ALERTE DE SÉCURITÉ\nL'appelant a tenté une action interdite : ${data.action}.\n\nCeci est une fraude, raccrochez immédiatement.`);
         }
       };
       esRef.current = es;
@@ -110,7 +112,7 @@ function App() {
 
   async function simulateCallerAction(action) {
     if (verified !== true) return;
-    logAction(`[API Conseiller] Demande au serveur : ${action}`);
+    logAction(`[API Distante] Demande au serveur : ${action}`);
     try {
       await fetch(`${API}/policy/evaluate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -148,7 +150,6 @@ function App() {
 
     logAction(`Utilisateur initie : ${actionName}...`);
 
-    // --- CAS : APPEL VÉRIFIÉ EN COURS ---
     if (verified === true) {
       if (summary.cannot.includes(actionName)) {
           logAction(`❌ ALERTE : Tentative action interdite pendant appel!`, 'err');
@@ -159,7 +160,7 @@ function App() {
 
       if (actionName === 'WIRE_TRANSFER') {
           logAction(`❌ ALERTE : Tentative Virement pendant appel.`, 'err');
-          setScamAlert(`🛡️ RAPPEL DE SÉCURITÉ\nVous tentez d'envoyer ${finalAmount.toFixed(2)}€ à "${transferRecipient}" alors qu'un conseiller est en ligne.\n\nSi le conseiller vous a demandé de faire ça, c'est une manipulation. RACCROCHEZ.`);
+          setScamAlert(`🛡️ RAPPEL DE SÉCURITÉ\nVous tentez d'envoyer ${finalAmount.toFixed(2)}€ à "${transferRecipient}" alors qu'un appel est en cours.\n\nSi l'appelant vous a demandé de faire ça, c'est une manipulation. RACCROCHEZ.`);
           setIsTransferPageOpen(false);
           return;
       }
@@ -169,8 +170,6 @@ function App() {
       return;
     }
 
-    // --- CAS : PAS D'APPEL VÉRIFIÉ (SÉCURITÉ PASSIVE) ---
-    // Si c'est un petit virement, ça passe silencieusement
     if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50) {
       logAction(`✅ Petit virement validé.`, 'success');
       setBalance(prev => prev - finalAmount);
@@ -180,9 +179,8 @@ function App() {
       return;
     }
 
-    // NOUVEAU MESSAGE DE SÉCURITÉ PASSIVE (Gros virement ou OTP)
     logAction(`Affichage sécurité passive pour ${actionName}.`, 'warn');
-    const isSafe = confirm(`🛡️ AVERTISSEMENT DE SÉCURITÉ\n\nVous vous apprêtez à faire une opération sensible (${actionName}${actionName === 'WIRE_TRANSFER' ? ' de ' + finalAmount.toFixed(2) + '€' : ''}).\n\nRAPPEL : Tous les appels de nos vrais conseillers sont automatiquement authentifiés en haut de cette application.\n\nSi quelqu'un au téléphone vous demande de faire ceci sans s'être identifié via l'app, C'EST UNE FRAUDE.\n\nÊtes-vous sûr de vouloir continuer de vous-même ?`);
+    const isSafe = confirm(`🛡️ AVERTISSEMENT DE SÉCURITÉ\n\nVous vous apprêtez à faire une opération sensible (${actionName}${actionName === 'WIRE_TRANSFER' ? ' de ' + finalAmount.toFixed(2) + '€' : ''}).\n\nRAPPEL : Tous les appels de nos vrais conseillers (ou de notre Agent IA) sont automatiquement authentifiés en haut de cette application.\n\nSi quelqu'un au téléphone vous demande de faire ceci sans s'être identifié via l'app, C'EST UNE FRAUDE.\n\nÊtes-vous sûr de vouloir continuer de vous-même ?`);
     
     if (!isSafe) { 
       logAction(`Action annulée.`, 'info'); 
@@ -208,10 +206,8 @@ function App() {
           e('p', null, 'Dernière connexion : Aujourd\'hui 14:15')
         ),
 
-        // Bannière persistante
-        verified === true && e('div', { className: 'call-banner verified' }, Icon('verified_user'), 'Appel sécurisé : Banque en ligne'),
+        verified === true && e('div', { className: 'call-banner verified' }, Icon(payload?.actor_type === 'AI_AGENT' ? 'smart_toy' : 'headset_mic'), `Appel sécurisé : ${actorName}`),
 
-        // ÉCRAN PRINCIPAL
         e('div', { className: 'mobile-content' },
           e('div', { className: 'bank-card' },
             e('div', { style: { fontSize: '0.9rem', opacity: 0.8, fontWeight: 500 } }, 'Compte Courant Principal'),
@@ -233,7 +229,6 @@ function App() {
           )
         ),
 
-        // PAGE : VIREMENT
         isTransferPageOpen && e('div', { className: 'mobile-page' },
           e('div', { className: 'page-header' },
             e('div', { className: 'back-btn', onClick: () => setIsTransferPageOpen(false) }, Icon('arrow_back')),
@@ -258,14 +253,14 @@ function App() {
           )
         ),
 
-        // NOUVEAU : POPUP DE PERMISSIONS (Fermable)
+        // LA FAMEUSE POPUP MISE À JOUR (Humain / IA Agent)
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal', style: { borderTop: '6px solid var(--success)' } },
             e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
               e('h3', { style: { margin: 0, color: '#0e7a0d', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' } }, Icon('gavel'), 'Contrat de Confiance'),
               e('button', { className: 'icon-btn-close', onClick: () => setShowPermissionsPopup(false) }, Icon('close'))
             ),
-            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `Un conseiller (${payload?.actor_type || 'Banque'}) a été authentifié avec succès.\n\nVoici ce qu'il a le droit de faire :`),
+            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `Un ${actorName} a été authentifié avec succès.\n\nVoici ce qu'il a le droit de faire :`),
             e('ul', { className: 'permissions-list' },
               summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check_circle'), e('span', null, x))),
               summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('cancel'), e('span', null, x)))
@@ -274,7 +269,6 @@ function App() {
           )
         ),
 
-        // Autres Modales (Step-up et Scam Alert)
         pendingConfirmation && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('div', { style: { color: 'var(--primary)', marginBottom: '1.25rem' } }, Icon('fingerprint')),
@@ -300,19 +294,21 @@ function App() {
       )
     ),
 
-    // CONSOLE ADMIN
+    // CONSOLE ADMIN MISE À JOUR
     e('div', { className: 'admin-panel' },
       e('div', { className: 'admin-card' },
         e('h3', null, Icon('settings_phone'), '1. Simuler l\'appel vers le client'),
         e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, 'Ouvre un canal sécurisé Castor avec l\'application client.'),
         e('div', { className: 'row' },
-          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('headset_mic'), 'Lancer Appel Vérifié')
+          // NOUVEAU : Deux boutons distincts pour choisir la source de l'appel
+          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('headset_mic'), 'Appel Vérifié (Humain)'),
+          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appel Vérifié (Agent IA)')
         )
       ),
 
       e('div', { className: 'admin-card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
-        e('h3', null, Icon('admin_panel_settings'), '2. Actions du conseiller (Serveur API)'),
-        e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, verified ? 'Canal ouvert. Tentez de déclencher des actions via l\'API.' : 'Connectez un appel vérifié pour activer l\'API.'),
+        e('h3', null, Icon('admin_panel_settings'), '2. Actions distantes (Serveur API)'),
+        e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, verified ? `Canal ouvert avec le client. Tentez de déclencher des actions via l'API.` : 'Connectez un appel vérifié pour activer l\'API.'),
         e('div', { className: 'row' },
           e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('credit_card_off'), 'Serveur : Bloquer Carte (Passe)'),
           e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Serveur : Virement (Bloqué)'),
