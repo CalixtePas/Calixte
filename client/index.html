@@ -24,14 +24,7 @@
       .bank-card { background: linear-gradient(135deg, #1e1e1e 0%, #3a3a3a 100%); color: white; padding: 1.5rem; border-radius: 16px; margin: 1.5rem 0; box-shadow: 0 10px 20px rgba(0,0,0,0.15); position: relative; }
       .balance { font-size: 2rem; font-weight: 700; margin: 1rem 0 0.5rem; }
       
-      /* NOUVEAU : Input Manuel pour le Virement */
-      .virement-section { background: white; padding: 1rem; border-radius: 12px; margin: 1.5rem 0 1rem; border: 1px solid #eee; }
-      .amount-selector { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; font-size: 0.9rem; font-weight: 500;}
-      .amount-selector input { border: 1px solid #ccc; background: white; padding: 0.5rem 0.75rem; border-radius: 6px; font-weight: 600; color: var(--text); font-family: inherit; font-size: 0.9rem; width: 120px; text-align: right; }
-      .amount-selector input:focus { outline: 2px solid var(--primary); border-color: transparent; }
-      .amount-selector input:disabled { background: #eee; cursor: not-allowed; }
-
-      .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+      .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.5rem; margin-bottom: 1rem; }
       .action-btn { background: var(--surface); border: 1px solid #eee; padding: 1rem; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500; font-size: 0.85rem; color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.02); transition: 0.2s; }
       .action-btn:hover { border-color: var(--primary); color: var(--primary); }
       .action-btn .icon { font-size: 1.5rem; color: var(--primary); }
@@ -53,6 +46,21 @@
       .permissions-card li .icon { font-size: 1rem; margin-top: 0.1rem; flex-shrink: 0; }
       .permissions-card li.can-text { color: #0e7a0d; font-weight: 500; }
       .permissions-card li.cannot-text { color: #da1e28; font-weight: 500; }
+
+      /* NOUVEAU : Écran de Virement (Slide Page) */
+      .mobile-page { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #fafafa; z-index: 50; display: flex; flex-direction: column; animation: slideInRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+      .page-header { display: flex; align-items: center; padding: 3rem 1.5rem 1.5rem; background: var(--surface); border-bottom: 1px solid #eee; gap: 1rem; }
+      .page-header .back-btn { cursor: pointer; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 50%; width: 36px; height: 36px; transition: 0.2s; }
+      .page-header .back-btn:hover { background: #e0e0e0; }
+      .page-content { padding: 1.5rem; flex: 1; overflow-y: auto; }
+      
+      .form-group { margin-bottom: 1.5rem; }
+      .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.85rem; color: #555; }
+      .form-group select, .form-group input { width: 100%; padding: 0.8rem 1rem; border: 1px solid #ddd; border-radius: 10px; font-family: inherit; font-size: 1rem; font-weight: 500; box-sizing: border-box; background: white; transition: 0.2s; }
+      .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,98,254,0.15); }
+      .form-group select:disabled { background: #eee; cursor: not-allowed; color: #666; }
+      
+      @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
       /* --- ZONE DROITE : CONSOLE ADMIN --- */
       .admin-panel { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; height: 100%; overflow-y: auto; padding-right: 1rem; }
@@ -91,7 +99,7 @@
       @keyframes toastUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     </style>
     <script>
-      // Attention à bien garder ton URL render + la route /castor/v1
+      // Attention à bien garder l'URL /castor/v1
       window.ENV = { API_BASE_URL: 'https://calixte-6.onrender.com/castor/v1' }; 
     </script>
   </head>
