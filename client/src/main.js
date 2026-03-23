@@ -39,7 +39,7 @@ function App() {
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   
   const isAI = payload?.actor_type === 'AI_AGENT';
-  const actorName = isAI ? 'Agent IA' : 'Conseiller Humain';
+  const actorName = isAI ? 'Agent IA' : 'Conseiller';
   const callerDescription = isAI ? "Une IA authentifiée" : "Un conseiller authentifié";
   const pronoun = isAI ? "Elle" : "Il";
 
@@ -61,7 +61,7 @@ function App() {
   // --- ACTIONS DU SIMULATEUR ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
-    const displayActor = actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller Humain';
+    const displayActor = actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller';
     logAction(`Connexion sécurisée avec ${displayActor} en cours...`);
     
     try {
@@ -92,20 +92,20 @@ function App() {
         if (data.type === 'STEP_UP') {
           setPendingActionName(data.action);
           setPendingConfirmation(data.confirmation_id);
-          logAction(`🔔 PUSH DU SERVEUR: Validation client requise pour ${data.action}.`, 'warn');
+          logAction(`🔔 PUSH DU SERVEUR: Validation requise pour ${data.action}.`, 'warn');
         } else if (data.type === 'ALLOW') {
           logAction(`ℹ️ PUSH DU SERVEUR: Action autorisée (${data.action}).`);
-          showToast(`Info : action ${data.action} exécutée.`);
+          showToast(`Action validée : ${data.action}`);
         } else if (data.type === 'DENY') {
-          logAction(`❌ PUSH DU SERVEUR: Action interdite bloquée (${data.action}).`, 'err');
-          setScamAlert(`ALERTE DE SÉCURITÉ\nL'appelant a tenté une action interdite : ${data.action}.\n\nCeci est une fraude, raccrochez immédiatement.`);
+          logAction(`❌ PUSH DU SERVEUR: Action bloquée (${data.action}).`, 'err');
+          setScamAlert(`ALERTE SÉCURITÉ\n\nL'appelant tente une opération bloquée par votre contrat (${data.action}).\n\nCeci est une fraude, raccrochez immédiatement.`);
         }
       };
       esRef.current = es;
     } catch (err) {
       setVerified(null);
       logAction('❌ Impossible de vérifier l\'appelant.', 'err');
-      showToast("Erreur de sécurité serveur.");
+      showToast("Erreur de sécurité.");
     } finally {
       setBusy(false);
     }
@@ -128,11 +128,11 @@ function App() {
     try {
       await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
       setPendingConfirmation('');
-      logAction('✅ Step-Up approuvé.', 'success');
-      showToast("🛡️ Action confirmée et sécurisée.");
-      if (pendingActionName === 'FREEZE_CARD') showToast("💳 Carte bloquée.");
+      logAction('✅ Validation biométrique envoyée.', 'success');
+      showToast("Action confirmée via FaceID.");
+      if (pendingActionName === 'FREEZE_CARD') showToast("Carte bloquée.");
     } catch (err) {
-      showToast("Erreur lors de la confirmation.");
+      showToast("Erreur de validation.");
     } finally {
       setBusy(false);
     }
@@ -144,7 +144,7 @@ function App() {
     if (actionName === 'WIRE_TRANSFER') {
       finalAmount = parseFloat(transferAmount);
       if (isNaN(finalAmount) || finalAmount <= 0) {
-        showToast("Veuillez saisir un montant de virement valide.");
+        showToast("Saisissez un montant valide.");
         return;
       }
     }
@@ -153,20 +153,17 @@ function App() {
 
     if (verified === true) {
       if (summary.cannot.includes(actionName)) {
-          logAction(`❌ ALERTE : Tentative action interdite pendant appel!`, 'err');
-          setScamAlert(`⚠️ RACCROCHEZ IMMÉDIATEMENT ⚠️\nL'appelant tente de vous manipuler pour faire une action interdite (${actionName}).`);
+          setScamAlert(`ATTENTION\n\nL'appelant tente de vous faire exécuter une action interdite (${actionName}). Raccrochez.`);
           setIsTransferPageOpen(false);
           return;
       }
 
       if (actionName === 'WIRE_TRANSFER') {
-          logAction(`❌ ALERTE : Tentative Virement pendant appel.`, 'err');
-          setScamAlert(`🛡️ RAPPEL DE SÉCURITÉ\nVous tentez d'envoyer ${finalAmount.toFixed(2)}€ à "${transferRecipient}" alors qu'un appel est en cours.\n\nSi l'appelant vous a demandé de faire ça, c'est une manipulation. RACCROCHEZ.`);
+          setScamAlert(`ALERTE FRAUDE\n\nVous tentez d'envoyer ${finalAmount.toFixed(2)}€ alors qu'un appel est en cours.\n\nSi l'interlocuteur vous le demande, c'est une manipulation. Raccrochez.`);
           setIsTransferPageOpen(false);
           return;
       }
 
-      logAction(`✅ Action (Mode Sécurisé) : ${actionName}`, 'success');
       showToast(`Action exécutée : ${actionName}`);
       return;
     }
@@ -176,38 +173,33 @@ function App() {
       setBalance(prev => prev - finalAmount);
       setTransferAmount('');
       setIsTransferPageOpen(false);
-      showToast(`✅ Virement de ${finalAmount.toFixed(2)} € envoyé.`);
+      showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`);
       return;
     }
 
-    logAction(`Affichage sécurité passive pour ${actionName}.`, 'warn');
-    const isSafe = confirm(`🛡️ AVERTISSEMENT DE SÉCURITÉ\n\nVous vous apprêtez à faire une opération sensible (${actionName}${actionName === 'WIRE_TRANSFER' ? ' de ' + finalAmount.toFixed(2) + '€' : ''}).\n\nRAPPEL : Tous les appels de nos vrais conseillers (ou de notre Agent IA) sont automatiquement authentifiés en haut de cette application.\n\nSi quelqu'un au téléphone vous demande de faire ceci sans s'être identifié via l'app, C'EST UNE FRAUDE.\n\nÊtes-vous sûr de vouloir continuer de vous-même ?`);
+    const isSafe = confirm(`SÉCURITÉ PASSIVE\n\nVous initiez une opération sensible.\nRAPPEL : Les vrais conseillers sont automatiquement authentifiés en haut de l'écran.\n\nSi quelqu'un vous guide au téléphone sans cette bannière, c'est une fraude.\n\nContinuer ?`);
     
-    if (!isSafe) { 
-      logAction(`Action annulée.`, 'info'); 
-      return; 
-    }
+    if (!isSafe) return;
 
     logAction(`✅ Action validée : ${actionName}`, 'success');
     if (actionName === 'WIRE_TRANSFER') {
       setBalance(prev => prev - finalAmount);
       setTransferAmount('');
       setIsTransferPageOpen(false);
-      showToast(`✅ Virement de ${finalAmount.toFixed(2)} € envoyé.`);
+      showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`);
     } else {
       showToast(`Action exécutée : ${actionName}`);
     }
   }
 
-  // --- ACTIONS POUR RACCROCHER ---
   function endCallClient() {
-    logAction("📞 L'utilisateur a mis fin à l'appel depuis l'application.", 'info');
-    showToast("Session sécurisée terminée.");
+    logAction("📞 Utilisateur a raccroché.", 'info');
+    showToast("Appel terminé.");
     resetState();
   }
 
   function endCallServer() {
-    logAction("📞 L'agent a mis fin à l'appel côté serveur.", 'info');
+    logAction("📞 Serveur a raccroché.", 'info');
     showToast("Le conseiller a raccroché.");
     resetState();
   }
@@ -215,105 +207,97 @@ function App() {
   return e('div', { className: 'demo-container' },
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
+        
         e('div', { className: 'mobile-header' },
-          e('h2', null, 'Bonjour, Alex 👋'),
-          e('p', null, 'Dernière connexion : Aujourd\'hui 14:15')
+          e('h2', null, 'CastorBank'),
+          e('div', { className: 'profile-pic' }, Icon('person'))
         ),
 
-        // BANNIÈRE APPEL SÉCURISÉ AVEC BOUTON "FIN DE L'APPEL"
-        verified === true && e('div', { className: 'call-banner verified', style: { justifyContent: 'space-between' } }, 
-          e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.75rem' } },
-            Icon(isAI ? 'smart_toy' : 'headset_mic'), 
-            `Appel sécurisé : ${actorName}`
+        // BANNIÈRE APPEL SÉCURISÉ (Plus discrète et "pill-shape")
+        verified === true && e('div', { className: 'call-banner verified' }, 
+          e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
+            Icon('lock'), `Appel : ${actorName}`
           ),
-          e('button', { 
-            onClick: endCallClient,
-            style: { 
-              background: '#da1e28', color: 'white', border: 'none', borderRadius: '50%', 
-              width: '32px', height: '32px', display: 'flex', alignItems: 'center', 
-              justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(218, 30, 40, 0.4)' 
-            },
-            title: "Raccrocher"
-          }, Icon('call_end'))
+          e('button', { className: 'end-call-btn', onClick: endCallClient }, Icon('call_end'))
         ),
 
         e('div', { className: 'mobile-content' },
           e('div', { className: 'bank-card' },
-            e('div', { style: { fontSize: '0.9rem', opacity: 0.8, fontWeight: 500 } }, 'Compte Courant Principal'),
+            e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
             e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
-            e('div', { style: { fontFamily: 'monospace', opacity: 0.7, fontSize: '0.9rem' } }, 'FR76 1234 **** **** **** 4092')
+            e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** **** 4092')
           ),
 
           e('div', { className: 'action-grid' },
-            e('div', { className: 'action-btn', onClick: () => setIsTransferPageOpen(true) }, Icon('sync_alt'), 'Nouveau Virement'),
-            e('div', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, Icon('chat'), 'Messagerie'),
-            e('div', { className: 'action-btn danger', onClick: () => handleUserAction('FREEZE_CARD') }, Icon('credit_card_off'), 'Bloquer carte'),
-            e('div', { className: 'action-btn danger', onClick: () => handleUserAction('ASK_OTP') }, Icon('password'), 'Code (OTP)')
+            e('button', { className: 'action-btn', onClick: () => setIsTransferPageOpen(true) }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
+            e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
+            e('button', { className: 'action-btn', onClick: () => handleUserAction('FREEZE_CARD') }, e('div', {className: 'icon'}, Icon('ac_unit')), 'Bloquer'),
+            e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code')
           ),
           
-          e('h3', { style: { fontSize: '1rem', marginTop: '1.5rem', marginBottom: '0.75rem' } }, 'Historique transactions'),
-          e('div', { style: { fontSize: '0.85rem', color: '#555', padding: '1rem', background: 'white', borderRadius: '10px', border: '1px solid #eee' } }, 
-            e('div', {style: {display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem'}}, e('span', null, 'Netflix Subscription'), e('span', {style: {color: '#da1e28'}}, '- 13,99 €')),
-            e('div', {style: {display: 'flex', justifyContent: 'space-between'}}, e('span', null, 'Virement Salaire'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
+          e('h3', { style: { fontSize: '1rem', marginTop: '2rem', marginBottom: '1rem' } }, 'Dernières opérations'),
+          e('div', { className: 'tx-list' }, 
+            e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
+            e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
           )
         ),
 
         isTransferPageOpen && e('div', { className: 'mobile-page' },
           e('div', { className: 'page-header' },
             e('div', { className: 'back-btn', onClick: () => setIsTransferPageOpen(false) }, Icon('arrow_back')),
-            e('h3', { style: { margin: 0, fontSize: '1.1rem' } }, 'Nouveau Virement')
+            e('h3', null, 'Virement')
           ),
           e('div', { className: 'page-content' },
             e('div', { className: 'form-group' },
-              e('label', null, 'Compte à débiter'),
+              e('label', null, 'Depuis'),
               e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toFixed(2)} €)`))
             ),
             e('div', { className: 'form-group' },
-              e('label', null, 'Bénéficiaire'),
+              e('label', null, 'Vers'),
               e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) },
                 RECIPIENTS.map(r => e('option', { key: r, value: r }, r))
               )
             ),
             e('div', { className: 'form-group' },
-              e('label', null, 'Montant du virement (€)'),
-              e('input', { type: 'number', min: '1', placeholder: 'Ex: 150.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })
+              e('label', null, 'Montant (€)'),
+              e('input', { type: 'number', min: '1', placeholder: '0.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })
             ),
-            e('button', { className: `action-btn full-width ${verified === true ? 'danger' : 'primary'}`, style: { marginTop: '2rem', border: '0' }, onClick: () => handleUserAction('WIRE_TRANSFER') }, Icon('send'), 'Valider le virement')
+            e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Continuer')
           )
         ),
 
-        // POPUP RÉÉCRITE AVEC DES TERMES PROS ET PLUS CLAIRS
+        // 1. BOTTOM SHEET : SECURITE DE L'APPEL (Remplace la popup carrée)
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
-          e('div', { className: 'modal', style: { borderTop: '6px solid var(--success)' } },
-            e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
-              e('h3', { style: { margin: 0, color: '#0e7a0d', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' } }, Icon('shield_person'), 'Sécurité de l\'appel'),
-              e('button', { className: 'icon-btn-close', onClick: () => setShowPermissionsPopup(false) }, Icon('close'))
-            ),
-            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `${callerDescription} est en ligne avec vous.\n\nVoici ses habilitations :`),
+          e('div', { className: 'modal' },
+            e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
+            e('p', {style: {color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: '1.4'}}, `${callerDescription} est en ligne. L'application restreint techniquement ses actions :`),
             e('ul', { className: 'permissions-list' },
-              summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check_circle'), e('span', null, x))),
-              summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('cancel'), e('span', null, x)))
+              summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check'), e('span', null, x))),
+              summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('close'), e('span', null, x)))
             ),
-            e('button', { className: 'modal-btn grey', style: { marginTop: '1.5rem' }, onClick: () => setShowPermissionsPopup(false) }, 'Fermer')
+            e('button', { className: 'modal-btn primary', onClick: () => setShowPermissionsPopup(false) }, 'Continuer')
           )
         ),
 
+        // 2. BOTTOM SHEET : VALIDATION REQUISE (Step-up FaceID)
         pendingConfirmation && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
-            e('div', { style: { color: 'var(--primary)', marginBottom: '1.25rem' } }, Icon('fingerprint')),
-            e('h3', { style: { margin: '0 0 0.5rem', fontSize: '1.1rem' } }, 'Validation Requise'),
-            e('p', { style: { fontSize: '0.85rem', color: '#666', lineHeight: '1.4' } }, `Confirmez-vous l'action : ${pendingActionName} ?`),
-            e('button', { className: 'modal-btn red', onClick: approveAction, disabled: busy }, 'Confirmer (FaceID)'),
-            e('button', { className: 'modal-btn grey', onClick: () => setPendingConfirmation('') }, 'Annuler')
+            e('div', { style: { textAlign: 'center' } },
+              e('div', { style: { color: 'var(--primary)', fontSize: '3rem', marginBottom: '1rem' } }, Icon('face')),
+              e('h3', { className: 'modal-title', style: { justifyContent: 'center' } }, 'Face ID requis'),
+              e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '2rem' } }, `Autoriser l'action : ${pendingActionName} ?`),
+              e('button', { className: 'modal-btn primary', onClick: approveAction, disabled: busy }, 'Confirmer'),
+              e('button', { className: 'modal-btn secondary', onClick: () => setPendingConfirmation('') }, 'Annuler')
+            )
           )
         ),
 
+        // 3. BOTTOM SHEET : ALERTE FRAUDE
         scamAlert && e('div', { className: 'modal-overlay' },
-          e('div', { className: 'modal danger' },
-            e('div', { style: { color: 'var(--danger)', marginBottom: '0.5rem' } }, Icon('error')),
-            e('h3', { style: { margin: '0 0 1rem', color: 'var(--danger)' } }, 'ARRÊTEZ TOUT !'),
-            e('p', { style: { fontSize: '0.9rem', whiteSpace: 'pre-wrap', lineHeight: '1.5', fontWeight: 500 } }, scamAlert),
-            e('button', { className: 'modal-btn grey', onClick: resetState }, 'J\'ai raccroché')
+          e('div', { className: 'modal' },
+            e('h3', { className: 'modal-title', style: { color: 'var(--danger)' } }, Icon('warning'), 'Arrêtez tout'),
+            e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', lineHeight: '1.5', marginBottom: '1.5rem' } }, scamAlert),
+            e('button', { className: 'modal-btn danger', onClick: resetState }, 'Raccrocher et signaler')
           )
         ),
 
@@ -323,7 +307,7 @@ function App() {
       )
     ),
 
-    // CONSOLE ADMIN
+    // CONSOLE ADMIN (Inchangée)
     e('div', { className: 'admin-panel' },
       e('div', { className: 'admin-card' },
         e('h3', null, Icon('settings_phone'), '1. Simuler l\'appel vers le client'),
@@ -331,12 +315,7 @@ function App() {
         e('div', { className: 'row' },
           e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('headset_mic'), 'Appel Vérifié (Humain)'),
           e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appel Vérifié (Agent IA)'),
-          // NOUVEAU : BOUTON POUR RACCROCHER DEPUIS LE SERVEUR
-          verified === true && e('button', { 
-            className: 'control-btn', 
-            style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, 
-            onClick: endCallServer 
-          }, Icon('call_end'), 'Fin de l\'appel')
+          verified === true && e('button', { className: 'control-btn', style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, onClick: endCallServer }, Icon('call_end'), 'Fin de l\'appel')
         )
       ),
 
@@ -344,9 +323,9 @@ function App() {
         e('h3', null, Icon('admin_panel_settings'), '2. Actions distantes (Serveur API)'),
         e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, verified ? `Canal ouvert avec le client. Tentez de déclencher des actions via l'API.` : 'Connectez un appel vérifié pour activer l\'API.'),
         e('div', { className: 'row' },
-          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('credit_card_off'), 'Serveur : Bloquer Carte (Passe)'),
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Serveur : Bloquer Carte (Passe)'),
           e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Serveur : Virement (Bloqué)'),
-          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('password'), 'Serveur : OTP (Bloqué)')
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('key'), 'Serveur : OTP (Bloqué)')
         )
       ),
 
