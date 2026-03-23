@@ -20,12 +20,9 @@ function App() {
   const [verified, setVerified] = useState(null); 
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
-  
-  // NOUVEL ÉTAT : Gestion du statut de la carte
   const [isCardFrozen, setIsCardFrozen] = useState(false);
   
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
-  
   const [isTransferPageOpen, setIsTransferPageOpen] = useState(false);
   const [transferAmount, setTransferAmount] = useState(''); 
   const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
@@ -45,6 +42,7 @@ function App() {
   const actorName = isAI ? 'Agent IA' : 'Conseiller';
   const callerDescription = isAI ? "Une IA authentifiée" : "Un conseiller authentifié";
 
+  // Des logs orientés CRM
   const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
   
   const showToast = (msg) => {
@@ -60,11 +58,10 @@ function App() {
     setIsTransferPageOpen(false); setShowPermissionsPopup(false);
   }
 
-  // --- ACTIONS DU SIMULATEUR ---
+  // --- ACTIONS DU CRM ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
-    const displayActor = actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller';
-    logAction(`Connexion sécurisée avec ${displayActor} en cours...`);
+    logAction(`Initialisation du protocole Castor (${actorType})...`);
     
     try {
       const resStart = await fetch(`${API}/interactions/start`, {
@@ -85,7 +82,7 @@ function App() {
       setInteractionId(id);
       
       setShowPermissionsPopup(true);
-      logAction(`✅ Preuve EdDSA valide. Canal temps réel ouvert.`, 'success');
+      logAction(`✅ Handshake cryptographique réussi. Session chiffrée.`, 'success');
 
       if (esRef.current) esRef.current.close();
       const es = new EventSource(`${API}/interactions/${id}/stream`);
@@ -94,19 +91,19 @@ function App() {
         if (data.type === 'STEP_UP') {
           setPendingActionName(data.action);
           setPendingConfirmation(data.confirmation_id);
-          logAction(`🔔 PUSH DU SERVEUR: Validation requise pour ${data.action}.`, 'warn');
+          logAction(`🔔 Demande envoyée : En attente de validation client pour ${data.action}.`, 'warn');
         } else if (data.type === 'ALLOW') {
-          logAction(`ℹ️ PUSH DU SERVEUR: Action autorisée (${data.action}).`);
+          logAction(`ℹ️ Action autorisée par le Policy Engine (${data.action}).`);
           showToast(`Action validée : ${data.action}`);
         } else if (data.type === 'DENY') {
-          logAction(`❌ PUSH DU SERVEUR: Action bloquée (${data.action}).`, 'err');
+          logAction(`❌ Rejet du serveur : Action bloquée par la politique de sécurité (${data.action}).`, 'err');
           setScamAlert(`ALERTE SÉCURITÉ\n\nL'appelant tente une opération bloquée par votre contrat (${data.action}).\n\nCeci est une fraude, raccrochez immédiatement.`);
         }
       };
       esRef.current = es;
     } catch (err) {
       setVerified(null);
-      logAction('❌ Impossible de vérifier l\'appelant.', 'err');
+      logAction('❌ Échec de la poignée de main cryptographique.', 'err');
       showToast("Erreur de sécurité.");
     } finally {
       setBusy(false);
@@ -115,25 +112,24 @@ function App() {
 
   async function simulateCallerAction(action) {
     if (verified !== true) return;
-    logAction(`[API Distante] Demande au serveur : ${action}`);
+    logAction(`[CRM] Tentative d'action via API : ${action}`);
     try {
       await fetch(`${API}/policy/evaluate`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ interaction_id: interactionId, action })
       });
-    } catch (err) { logAction(`Erreur réseau.`, 'err'); }
+    } catch (err) { logAction(`Erreur de connexion API.`, 'err'); }
   }
 
-  // --- ACTIONS DE L'UTILISATEUR ---
+  // --- ACTIONS DU CLIENT (MOBILE) ---
   async function approveAction() {
     setBusy(true);
     try {
       await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
       setPendingConfirmation('');
-      logAction('✅ Validation biométrique envoyée.', 'success');
+      logAction('✅ Client a validé l\'opération (Biométrie confirmée).', 'success');
       showToast("Action confirmée via FaceID.");
       
-      // On bloque visuellement la carte si c'était l'action demandée par le serveur
       if (pendingActionName === 'FREEZE_CARD') {
         setIsCardFrozen(true);
         showToast("Carte bloquée.");
@@ -156,7 +152,7 @@ function App() {
       }
     }
 
-    logAction(`Utilisateur initie : ${actionName}...`);
+    logAction(`Le client initie : ${actionName}...`);
 
     if (verified === true) {
       if (summary.cannot.includes(actionName)) {
@@ -171,7 +167,6 @@ function App() {
           return;
       }
 
-      // Traitement direct si on est en appel vérifié et que l'action est autorisée
       if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
       if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
 
@@ -180,7 +175,7 @@ function App() {
     }
 
     if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50) {
-      logAction(`✅ Petit virement validé.`, 'success');
+      logAction(`✅ Virement standard validé (<50€).`, 'success');
       setBalance(prev => prev - finalAmount);
       setTransferAmount('');
       setIsTransferPageOpen(false);
@@ -192,7 +187,7 @@ function App() {
     
     if (!isSafe) return;
 
-    logAction(`✅ Action validée : ${actionName}`, 'success');
+    logAction(`✅ Opération client validée : ${actionName}`, 'success');
     
     if (actionName === 'FREEZE_CARD') {
       setIsCardFrozen(true);
@@ -211,18 +206,22 @@ function App() {
   }
 
   function endCallClient() {
-    logAction("📞 Utilisateur a raccroché.", 'info');
+    logAction("📞 Session interrompue par le client.", 'warn');
     showToast("Appel terminé.");
     resetState();
   }
 
   function endCallServer() {
-    logAction("📞 Serveur a raccroché.", 'info');
+    logAction("📞 Session clôturée par le conseiller.", 'info');
     showToast("Le conseiller a raccroché.");
     resetState();
   }
 
   return e('div', { className: 'demo-container' },
+    
+    // ===============================================
+    // GAUCHE : APP MOBILE DU CLIENT (iOS/Android)
+    // ===============================================
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
         
@@ -239,8 +238,6 @@ function App() {
         ),
 
         e('div', { className: 'mobile-content' },
-          
-          // LA CARTE BANCAIRE (Gestion de l'état bloqué)
           e('div', { className: `bank-card ${isCardFrozen ? 'frozen' : ''}` },
             isCardFrozen && e('div', { className: 'frozen-badge' }, Icon('ac_unit'), 'BLOQUÉE'),
             e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
@@ -251,16 +248,10 @@ function App() {
           e('div', { className: 'action-grid' },
             e('button', { className: 'action-btn', onClick: () => setIsTransferPageOpen(true) }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
             e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-            
-            // BOUTON DYNAMIQUE BLOQUER / DÉBLOQUER
-            e('button', { 
-              className: `action-btn`, 
-              onClick: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') 
-            }, 
+            e('button', { className: `action-btn`, onClick: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }, 
               e('div', {className: 'icon', style: { color: isCardFrozen ? 'var(--primary)' : 'var(--danger)' }}, Icon(isCardFrozen ? 'lock_open' : 'ac_unit')), 
               isCardFrozen ? 'Débloquer' : 'Bloquer'
             ),
-            
             e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code')
           ),
           
@@ -271,6 +262,7 @@ function App() {
           )
         ),
 
+        // PAGES ET MODALES MOBILE
         isTransferPageOpen && e('div', { className: 'mobile-page' },
           e('div', { className: 'page-header' },
             e('div', { className: 'back-btn', onClick: () => setIsTransferPageOpen(false) }, Icon('arrow_back')),
@@ -333,31 +325,47 @@ function App() {
       )
     ),
 
+    // ===============================================
+    // DROITE : PORTAIL CONSEILLER (CRM B2B)
+    // ===============================================
     e('div', { className: 'admin-panel' },
-      e('div', { className: 'admin-card' },
-        e('h3', null, Icon('settings_phone'), '1. Simuler l\'appel vers le client'),
-        e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, 'Ouvre un canal sécurisé Castor avec l\'application client.'),
-        e('div', { className: 'row' },
-          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('headset_mic'), 'Appel Vérifié (Humain)'),
-          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appel Vérifié (Agent IA)'),
-          verified === true && e('button', { className: 'control-btn', style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, onClick: endCallServer }, Icon('call_end'), 'Fin de l\'appel')
+      e('h2', { className: 'crm-header' }, Icon('support_agent'), 'Portail Conseiller (CRM)'),
+
+      // FICHE CLIENT & AUTHENTIFICATION
+      e('div', { className: 'admin-card', style: { borderTop: '4px solid var(--primary)' } },
+        e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+          e('div', null,
+            e('h3', { style: { margin: '0 0 0.25rem 0', borderBottom: 'none', padding: 0 } }, 'Alexandre Dupont'),
+            e('p', { style: { margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' } }, 'ID Client : 09843-AX | Seg: Particulier')
+          ),
+          e('div', { className: `crm-status-badge ${verified ? 'secure' : 'idle'}` },
+            Icon(verified ? 'lock' : 'lock_open'),
+            verified ? 'Authentifié (Castor)' : 'Non authentifié'
+          )
+        ),
+        e('div', { className: 'row', style: { marginTop: '1.5rem', borderTop: '1px solid #eee', paddingTop: '1rem' } },
+          !verified && e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('shield'), 'Authentifier le client (Castor)'),
+          !verified && e('button', { className: 'control-btn', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Lancer Voicebot IA (Castor)'),
+          verified && e('button', { className: 'control-btn', style: { color: 'var(--danger)', borderColor: 'var(--danger)' }, onClick: endCallServer }, Icon('call_end'), 'Clôturer la session sécurisée')
         )
       ),
 
+      // ACTIONS DISTANTES DU CRM
       e('div', { className: 'admin-card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
-        e('h3', null, Icon('admin_panel_settings'), '2. Actions distantes (Serveur API)'),
-        e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, verified ? `Canal ouvert avec le client. Tentez de déclencher des actions via l'API.` : 'Connectez un appel vérifié pour activer l\'API.'),
+        e('h3', null, Icon('dashboard_customize'), 'Actions Conseiller (Distantes)'),
+        e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, verified ? 'Le canal est sécurisé. Vos actions sont limitées par la politique du serveur.' : 'Veuillez authentifier le client pour activer les actions.'),
         e('div', { className: 'row' },
-          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Serveur : Bloquer Carte (Passe)'),
-          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Serveur : Virement (Bloqué)'),
-          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('key'), 'Serveur : OTP (Bloqué)')
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Geler la carte (Step-Up)'),
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Initier virement (Bloqué)'),
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('key'), 'Générer OTP (Bloqué)')
         )
       ),
 
+      // PISTE D'AUDIT
       e('div', { className: 'admin-card', style: { flex: 1, display: 'flex', flexDirection: 'column' } },
-        e('h3', null, Icon('terminal'), 'Logs d\'audit (Temps Réel)'),
+        e('h3', null, Icon('history'), 'Piste d\'audit (Compliance)'),
         e('div', { className: 'logs' },
-          actionLog.length === 0 && e('div', null, '> En attente d\'événements...'),
+          actionLog.length === 0 && e('div', null, '> En attente d\'interactions...'),
           actionLog.map((log, i) => e('div', { key: i, className: log.type }, `[${log.t}] ${log.msg}`))
         )
       )
