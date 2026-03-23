@@ -13,13 +13,13 @@
       #root { display: flex; width: 100%; height: 100%; }
       .demo-container { display: flex; width: 100%; max-width: 1400px; margin: 0 auto; gap: 2rem; padding: 2rem; box-sizing: border-box; }
       
-      /* --- ZONE GAUCHE : L'APP MOBILE REALISTE --- */
+      /* --- ZONE GAUCHE : APP MOBILE --- */
       .mobile-wrapper { flex: 0 0 375px; display: flex; justify-content: center; align-items: center; }
       .mobile-device { width: 375px; height: 812px; background: var(--surface); border-radius: 40px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25), 0 0 0 10px #222; position: relative; overflow: hidden; display: flex; flex-direction: column; }
       .mobile-header { padding: 3rem 1.5rem 1rem; background: var(--surface); z-index: 10; border-bottom: 1px solid #eee; }
       .mobile-header h2 { margin: 0; font-size: 1.25rem; }
       .mobile-header p { margin: 0; color: #666; font-size: 0.9rem; }
-      .mobile-content { flex: 1; overflow-y: auto; padding: 0 1.5rem 2rem; background: #fafafa; }
+      .mobile-content { flex: 1; overflow-y: auto; padding: 0 1.5rem 2rem; background: #fafafa; position: relative; }
       
       .bank-card { background: linear-gradient(135deg, #1e1e1e 0%, #3a3a3a 100%); color: white; padding: 1.5rem; border-radius: 16px; margin: 1.5rem 0; box-shadow: 0 10px 20px rgba(0,0,0,0.15); position: relative; }
       .balance { font-size: 2rem; font-weight: 700; margin: 1rem 0 0.5rem; }
@@ -30,43 +30,39 @@
       .action-btn .icon { font-size: 1.5rem; color: var(--primary); }
       .action-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
       .action-btn.danger .icon { color: var(--danger); }
-      .action-btn.full-width { grid-column: span 2; background: var(--primary); color: white; border-color: var(--primary); flex-direction: row; justify-content: center; font-weight: 600; padding: 0.75rem; }
-      .action-btn.full-width .icon { color: white; }
-      .action-btn.full-width:hover { filter: brightness(1.1); color: white; }
-
+      
+      /* Bannière persistante (Appel Vérifié en cours) */
       .call-banner { margin: 1rem 1.5rem 0; padding: 0.75rem 1rem; border-radius: 12px; display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; font-weight: 600; animation: slideDown 0.3s ease; }
       .call-banner.verified { background: #defbe6; color: #0e7a0d; border: 1px solid #24a148; }
-      .call-banner.unknown { background: #e0e0e0; color: #333; }
       @keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-      .permissions-card { background: white; padding: 1.25rem; border-radius: 12px; margin-top: 1rem; border: 2px solid var(--success); font-size: 0.8rem; box-shadow: 0 4px 12px rgba(36, 161, 72, 0.1); animation: fadeIn 0.5s; }
-      .permissions-card h4 { margin: 0 0 0.75rem 0; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; color: #0e7a0d; }
-      .permissions-card ul { margin: 0; padding-left: 1.2rem; list-style: none; }
-      .permissions-card li { margin-bottom: 0.4rem; display: flex; align-items: start; gap: 0.4rem; line-height: 1.3; }
-      .permissions-card li .icon { font-size: 1rem; margin-top: 0.1rem; flex-shrink: 0; }
-      .permissions-card li.can-text { color: #0e7a0d; font-weight: 500; }
-      .permissions-card li.cannot-text { color: #da1e28; font-weight: 500; }
+      /* Liste de permissions pour la popup */
+      .permissions-list { margin: 0; padding: 0; list-style: none; text-align: left; font-size: 0.9rem; }
+      .permissions-list li { margin-bottom: 0.6rem; display: flex; align-items: start; gap: 0.5rem; line-height: 1.3; }
+      .permissions-list li .icon { font-size: 1.1rem; margin-top: 0.1rem; flex-shrink: 0; }
+      .permissions-list li.can-text { color: #0e7a0d; font-weight: 500; }
+      .permissions-list li.cannot-text { color: #da1e28; font-weight: 500; }
 
-      /* NOUVEAU : Écran de Virement (Slide Page) */
+      /* --- PAGE VIREMENT --- */
       .mobile-page { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #fafafa; z-index: 50; display: flex; flex-direction: column; animation: slideInRight 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
       .page-header { display: flex; align-items: center; padding: 3rem 1.5rem 1.5rem; background: var(--surface); border-bottom: 1px solid #eee; gap: 1rem; }
       .page-header .back-btn { cursor: pointer; display: flex; align-items: center; justify-content: center; background: #f0f0f0; border-radius: 50%; width: 36px; height: 36px; transition: 0.2s; }
-      .page-header .back-btn:hover { background: #e0e0e0; }
       .page-content { padding: 1.5rem; flex: 1; overflow-y: auto; }
       
       .form-group { margin-bottom: 1.5rem; }
       .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.85rem; color: #555; }
       .form-group select, .form-group input { width: 100%; padding: 0.8rem 1rem; border: 1px solid #ddd; border-radius: 10px; font-family: inherit; font-size: 1rem; font-weight: 500; box-sizing: border-box; background: white; transition: 0.2s; }
       .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,98,254,0.15); }
-      .form-group select:disabled { background: #eee; cursor: not-allowed; color: #666; }
       
+      .action-btn.full-width { background: var(--primary); color: white; border: 0; border-radius: 12px; padding: 1rem; width: 100%; display: flex; justify-content: center; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1rem; cursor: pointer; transition: 0.2s; }
+      .action-btn.full-width:hover { filter: brightness(1.1); }
+      .action-btn.full-width.danger { background: var(--danger); }
       @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
       /* --- ZONE DROITE : CONSOLE ADMIN --- */
       .admin-panel { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; height: 100%; overflow-y: auto; padding-right: 1rem; }
       .admin-card { background: var(--surface); padding: 1.5rem; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #eaeaea; }
       .admin-card h3 { margin-top: 0; display: flex; align-items: center; gap: 0.5rem; font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 0.75rem; }
-      
       .row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem; }
       button.control-btn { border: 0; background: var(--surface); border: 1px solid #ccc; color: var(--text); padding: 0.6rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 0.5rem; transition: 0.2s; font-family: inherit; }
       button.control-btn:hover:not(:disabled) { background: #f0f0f0; }
@@ -83,13 +79,14 @@
 
       /* --- MODALES & TOASTS --- */
       .modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 100; animation: fadeIn 0.2s; }
-      .modal { background: white; padding: 1.5rem; border-radius: 16px; width: 80%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.2); animation: slideUpModal 0.3s ease-out;}
+      .modal { background: white; padding: 1.5rem; border-radius: 16px; width: 85%; box-sizing: border-box; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.2); animation: slideUpModal 0.3s ease-out;}
       .modal.danger { border-top: 8px solid var(--danger); }
       .modal-btn { width: 100%; padding: 0.8rem; border-radius: 8px; border: 0; font-weight: 600; cursor: pointer; margin-top: 0.5rem; font-family: inherit; font-size: 0.9rem;}
       .modal-btn.red { background: var(--danger); color: white; }
-      .modal-btn.red:hover { filter: brightness(1.1); }
       .modal-btn.grey { background: #eee; color: #333; }
-      .modal-btn.grey:hover { background: #e0e0e0; }
+      
+      .icon-btn-close { background: transparent; border: 0; color: #666; cursor: pointer; padding: 0.25rem; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: 0.2s; }
+      .icon-btn-close:hover { background: #f0f0f0; color: #000; }
 
       .toast-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 0.5rem; z-index: 200; width: 90%; }
       .toast { background: #333; color: white; padding: 0.8rem 1.2rem; border-radius: 8px; font-size: 0.85rem; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: toastUp 0.3s ease-out; font-weight: 500; }
@@ -99,7 +96,6 @@
       @keyframes toastUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     </style>
     <script>
-      // Attention à bien garder l'URL /castor/v1
       window.ENV = { API_BASE_URL: 'https://calixte-6.onrender.com/castor/v1' }; 
     </script>
   </head>
