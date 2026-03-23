@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { confirmations, interactions, pushAudit, clients, broadcast, type ActorType, type Decision } from './store.ts';
 import { getJwks, signToken } from './jwt.ts';
 
-const PREFIX = '/calixte/v1';
+// NOUVEAU NOM DE L'API
+const PREFIX = '/castor/v1';
 
 type Json = Record<string, unknown>;
 
@@ -25,19 +26,13 @@ async function readBody(req: IncomingMessage): Promise<Json> {
   }
 }
 
-// Moteur de règles STRICT (Tolérance Zéro pour OTP et Virements)
 function evaluateAction(action: string): { decision: Decision; reason: string } {
   switch (action) {
-    case 'ASK_OTP':
-      return { decision: 'DENY', reason: 'OTP requests are strictly blocked as scam indicators.' };
-    case 'WIRE_TRANSFER':
-      return { decision: 'DENY', reason: 'Wire transfers initiated by caller are strictly forbidden, regardless of amount.' };
-    case 'FREEZE_CARD':
-      return { decision: 'STEP_UP', reason: 'Card freeze requires out-of-band confirmation.' };
-    case 'DISCUSS_CASE':
-      return { decision: 'ALLOW', reason: 'Discussion-only action is permitted.' };
-    default:
-      return { decision: 'DENY', reason: 'Unknown action for this policy.' };
+    case 'ASK_OTP': return { decision: 'DENY', reason: 'OTP requests are strictly blocked as scam indicators.' };
+    case 'WIRE_TRANSFER': return { decision: 'DENY', reason: 'Wire transfers initiated by caller are strictly forbidden, regardless of amount.' };
+    case 'FREEZE_CARD': return { decision: 'STEP_UP', reason: 'Card freeze requires out-of-band confirmation.' };
+    case 'DISCUSS_CASE': return { decision: 'ALLOW', reason: 'Discussion-only action is permitted.' };
+    default: return { decision: 'DENY', reason: 'Unknown action for this policy.' };
   }
 }
 
@@ -56,7 +51,6 @@ export function buildServer() {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); 
-      
       res.write('data: {"type":"CONNECTED"}\n\n');
 
       if (!clients.has(interaction_id)) clients.set(interaction_id, new Set());
@@ -78,13 +72,13 @@ export function buildServer() {
       const now = Math.floor(Date.now() / 1000);
       interactions.set(interaction_id, { interaction_id, actor_type: body.actor_type, intent: body.intent, audience_ref: body.audience_ref, created_at: Date.now() });
 
-      // On affiche les règles claires (plus de notion de montants)
       const summary = {
         can: ['DISCUSS_CASE', 'FREEZE_CARD_WITH_STEP_UP'],
         cannot: ['ASK_OTP', 'WIRE_TRANSFER', 'SHARE_SECRETS']
       };
 
-      const token = signToken({ iss: 'calixte', sub: interaction_id, aud: body.audience_ref, iat: now, exp: now + 10 * 60, actor_type: body.actor_type, intent: body.intent, summary });
+      // NOUVEAU NOM DE L'ÉMETTEUR (iss: 'castor')
+      const token = signToken({ iss: 'castor', sub: interaction_id, aud: body.audience_ref, iat: now, exp: now + 10 * 60, actor_type: body.actor_type, intent: body.intent, summary });
       pushAudit('interaction.start', { interaction_id });
       return send(res, 200, { interaction_id, token, summary });
     }
