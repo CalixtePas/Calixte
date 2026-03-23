@@ -6,6 +6,14 @@ const API = window.ENV?.API_BASE_URL || 'http://localhost:3001/castor/v1';
 const e = React.createElement;
 const Icon = (name) => e('span', { className: 'material-symbols-outlined icon' }, name);
 
+const RECIPIENTS = [
+  'Nouveau bénéficiaire...',
+  'Bailleur (Loyer Mensuel)',
+  'Maître Leblanc (Notaire Immo)',
+  'Jean Dupont (Remboursement)',
+  'Compte Épargne Externe'
+];
+
 function App() {
   const [balance, setBalance] = useState(12450.00);
   const [token, setToken] = useState('');
@@ -13,8 +21,10 @@ function App() {
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
   
-  // NOUVEAU : État gérant la saisie libre au clavier
-  const [selectedAmount, setSelectedAmount] = useState(''); 
+  // Navigation Mobile interne
+  const [isTransferPageOpen, setIsTransferPageOpen] = useState(false);
+  const [transferAmount, setTransferAmount] = useState(''); 
+  const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
   
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
@@ -38,6 +48,7 @@ function App() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setPendingConfirmation(''); setPendingActionName(''); setScamAlert('');
+    setIsTransferPageOpen(false);
     logAction("Session réinitialisée (Mode IDLE).", 'info');
   }
 
@@ -58,7 +69,6 @@ function App() {
       const jwks = await jwksRes.json();
       const key = await importJWK(jwks.keys[0], 'EdDSA');
       
-      // Validation avec le nouvel émetteur CASTOR
       const result = await jwtVerify(dataStart.token, key, { issuer: 'castor' });
       
       setVerified(true); setPayload(result.payload);
@@ -131,9 +141,8 @@ function App() {
   function handleUserAction(actionName) {
     let finalAmount = 0;
 
-    // Si c'est un virement, on valide le montant saisi manuellement
     if (actionName === 'WIRE_TRANSFER') {
-      finalAmount = parseFloat(selectedAmount);
+      finalAmount = parseFloat(transferAmount);
       if (isNaN(finalAmount) || finalAmount <= 0) {
         showToast("Veuillez saisir un montant de virement valide.");
         logAction("Virement annulé : montant invalide saisi.", 'warn');
@@ -143,16 +152,19 @@ function App() {
 
     logAction(`Utilisateur initie : ${actionName}...`);
 
+    // --- CAS : APPEL VÉRIFIÉ ---
     if (verified === true) {
       if (summary.cannot.includes(actionName)) {
           logAction(`❌ ALERTE : Tentative action interdite par utilisateur pendant appel!`, 'err');
           setScamAlert(`⚠️ RACCROCHEZ IMMÉDIATEMENT ⚠️\nL'appelant tente de vous manipuler pour faire une action interdite (${actionName}).\n\nCeci est une fraude.`);
+          setIsTransferPageOpen(false);
           return;
       }
 
       if (actionName === 'WIRE_TRANSFER') {
           logAction(`❌ ALERTE : Tentative Virement initié par utilisateur pendant appel sécurisé.`, 'err');
-          setScamAlert(`🛡️ RAPPEL DE SÉCURITÉ\nVous tentez de faire un virement de ${finalAmount.toFixed(2)}€ alors qu'un conseiller est en ligne.\n\nS'il vous l'a demandé, c'est une manipulation. RACCROCHEZ.\n\nFaites cette opération vous-même plus tard.`);
+          setScamAlert(`🛡️ RAPPEL DE SÉCURITÉ\nVous tentez d'envoyer ${finalAmount.toFixed(2)}€ à "${transferRecipient}" alors qu'un conseiller est en ligne.\n\nSi le conseiller vous a poussé à faire ça, c'est une manipulation pour contourner les blocages du serveur. RACCROCHEZ.`);
+          setIsTransferPageOpen(false);
           return;
       }
 
@@ -161,16 +173,18 @@ function App() {
       return;
     }
 
+    // --- CAS : IDLE / INCONNU ---
     if (actionName === 'WIRE_TRANSFER' && finalAmount < 50) {
-      logAction(`✅ Petit virement (<50€) validé silencieusement (Mode standard).`, 'success');
+      logAction(`✅ Petit virement (<50€) validé silencieusement.`, 'success');
       setBalance(prev => prev - finalAmount);
-      setSelectedAmount(''); // Reset de l'input après succès
-      showToast(`✅ Virement de ${finalAmount.toFixed(2)} € effectué.`);
+      setTransferAmount('');
+      setIsTransferPageOpen(false);
+      showToast(`✅ Virement de ${finalAmount.toFixed(2)} € vers "${transferRecipient}" effectué.`);
       return;
     }
 
     logAction(`Affichage popup sécurité standard pour ${actionName}.`, 'warn');
-    const isSafe = confirm(`🛡️ RAPPEL DE SÉCURITÉ\n\nVous vous apprêtez à faire une action sensible (${actionName}${actionName === 'WIRE_TRANSFER' ? ' ' + finalAmount.toFixed(2) + '€' : ''}).\n\nSi un soi-disant "conseiller" au téléphone vous demande de faire cela sans s'être identifié via l'application, C'EST UNE FRAUDE.\n\nÊtes-vous sûr de vouloir continuer cette action vous-même ?`);
+    const isSafe = confirm(`🛡️ RAPPEL DE SÉCURITÉ\n\nVous vous apprêtez à faire une action sensible (${actionName}${actionName === 'WIRE_TRANSFER' ? ' de ' + finalAmount.toFixed(2) + '€ vers ' + transferRecipient : ''}).\n\nSi un "conseiller" au téléphone vous demande de faire cela sans s'être identifié via l'app, C'EST UNE FRAUDE.\n\nÊtes-vous sûr de vouloir continuer cette action vous-même ?`);
     
     if (!isSafe) { 
       logAction(`Action annulée par l'utilisateur par précaution.`, 'info'); 
@@ -180,16 +194,13 @@ function App() {
     logAction(`✅ Action validée par utilisateur : ${actionName}`, 'success');
     if (actionName === 'WIRE_TRANSFER') {
       setBalance(prev => prev - finalAmount);
-      setSelectedAmount('');
-      showToast(`✅ Virement de ${finalAmount.toFixed(2)} € effectué.`);
+      setTransferAmount('');
+      setIsTransferPageOpen(false);
+      showToast(`✅ Virement de ${finalAmount.toFixed(2)} € envoyé.`);
     } else {
       showToast(`✅ Action exécutée : ${actionName}`);
     }
   }
-
-  // Permet de formater l'affichage du bouton
-  const parsedAmount = parseFloat(selectedAmount);
-  const btnAmountText = (isNaN(parsedAmount) || parsedAmount <= 0) ? '...' : parsedAmount.toFixed(2);
 
   return e('div', { className: 'demo-container' },
     e('div', { className: 'mobile-wrapper' },
@@ -202,6 +213,7 @@ function App() {
         verified === true && e('div', { className: 'call-banner verified' }, Icon('verified_user'), 'Appel sécurisé : Banque en ligne'),
         verified === false && e('div', { className: 'call-banner unknown' }, Icon('phone_in_talk'), 'Appel entrant inconnu'),
 
+        // ÉCRAN PRINCIPAL
         e('div', { className: 'mobile-content' },
           e('div', { className: 'bank-card' },
             e('div', { style: { fontSize: '0.9rem', opacity: 0.8, fontWeight: 500 } }, 'Compte Courant Principal'),
@@ -218,23 +230,10 @@ function App() {
             )
           ),
 
-          e('div', { className: 'virement-section' },
-            e('div', { className: 'amount-selector' },
-              e('span', null, 'Montant à virer :'),
-              // NOUVEAU : Champ de saisie manuel (Input Number)
-              e('input', { 
-                type: 'number', 
-                min: '1', 
-                placeholder: 'Ex: 15.00',
-                value: selectedAmount, 
-                onChange: (evt) => setSelectedAmount(evt.target.value), 
-                disabled: verified === true 
-              })
-            ),
-            e('div', { className: `action-btn full-width ${verified === true ? 'danger' : ''}`, onClick: () => handleUserAction('WIRE_TRANSFER') }, Icon('sync_alt'), `Faire un virement de ${btnAmountText} €`)
-          ),
-
+          // Les actions principales
           e('div', { className: 'action-grid' },
+            // Le clic ouvre la nouvelle page de virement
+            e('div', { className: 'action-btn', onClick: () => setIsTransferPageOpen(true) }, Icon('sync_alt'), 'Nouveau Virement'),
             e('div', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, Icon('chat'), 'Messagerie'),
             e('div', { className: 'action-btn danger', onClick: () => handleUserAction('FREEZE_CARD') }, Icon('credit_card_off'), 'Bloquer carte'),
             e('div', { className: 'action-btn danger', onClick: () => handleUserAction('ASK_OTP') }, Icon('password'), 'Code (OTP)')
@@ -244,6 +243,41 @@ function App() {
           e('div', { style: { fontSize: '0.85rem', color: '#555', padding: '1rem', background: 'white', borderRadius: '10px', border: '1px solid #eee' } }, 
             e('div', {style: {display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem'}}, e('span', null, 'Netflix Subscription'), e('span', {style: {color: '#da1e28'}}, '- 13,99 €')),
             e('div', {style: {display: 'flex', justifyContent: 'space-between'}}, e('span', null, 'Virement Salaire'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
+          )
+        ),
+
+        // NOUVELLE PAGE : VIREMENT (Superposée)
+        isTransferPageOpen && e('div', { className: 'mobile-page' },
+          e('div', { className: 'page-header' },
+            e('div', { className: 'back-btn', onClick: () => setIsTransferPageOpen(false) }, Icon('arrow_back')),
+            e('h3', { style: { margin: 0, fontSize: '1.1rem' } }, 'Nouveau Virement')
+          ),
+          e('div', { className: 'page-content' },
+            e('div', { className: 'form-group' },
+              e('label', null, 'Compte à débiter'),
+              e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toFixed(2)} €)`))
+            ),
+            e('div', { className: 'form-group' },
+              e('label', null, 'Bénéficiaire'),
+              e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) },
+                RECIPIENTS.map(r => e('option', { key: r, value: r }, r))
+              )
+            ),
+            e('div', { className: 'form-group' },
+              e('label', null, 'Montant du virement (€)'),
+              e('input', { 
+                type: 'number', 
+                min: '1', 
+                placeholder: 'Ex: 150.00',
+                value: transferAmount, 
+                onChange: (evt) => setTransferAmount(evt.target.value)
+              })
+            ),
+            e('button', { 
+              className: `action-btn full-width ${verified === true ? 'danger' : 'primary'}`, 
+              style: { marginTop: '2rem' }, 
+              onClick: () => handleUserAction('WIRE_TRANSFER') 
+            }, Icon('send'), 'Valider le virement')
           )
         ),
 
