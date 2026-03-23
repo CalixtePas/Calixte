@@ -7,45 +7,47 @@ const e = React.createElement;
 const Icon = (name) => e('span', { className: 'material-symbols-outlined icon' }, name);
 
 function App() {
+  // États de l'application
   const [token, setToken] = useState('');
-  const [verified, setVerified] = useState(null);
-  const [verifyMsg, setVerifyMsg] = useState('');
+  const [verified, setVerified] = useState(null); // null = IDLE, true = VÉRIFIÉ, false = SCAM
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
+  
+  // Modales et Toasts
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
-  
-  // NOUVEL ÉTAT : Pour afficher l'alerte d'urgence rouge
   const [scamAlert, setScamAlert] = useState('');
+  const [toasts, setToasts] = useState([]);
   
   const [busy, setBusy] = useState(false);
   const [actionLog, setActionLog] = useState([]);
   const esRef = useRef(null);
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
-  const logAction = (msg) => setActionLog(prev => [msg, ...prev].slice(0, 5));
+
+  // Système de logs et de notifications in-app
+  const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
+  
+  const showToast = (msg) => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+  };
 
   function resetState() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
-    setToken('');
-    setVerified(null);
-    setVerifyMsg('');
-    setPayload(null);
-    setInteractionId('');
-    setPendingConfirmation('');
-    setPendingActionName('');
-    setScamAlert('');
+    setToken(''); setVerified(null); setPayload(null); setInteractionId('');
+    setPendingConfirmation(''); setPendingActionName(''); setScamAlert('');
   }
 
+  // --- ACTIONS DU SIMULATEUR (APPELANT) ---
   async function simulateIncomingCall(actorType) {
-    setBusy(true);
-    resetState();
-    logAction(`📞 Appel entrant détecté (${actorType}). Recherche de preuve...`);
+    setBusy(true); resetState();
+    logAction(`Simulation d'appel entrant (${actorType})...`);
     
     try {
       const resStart = await fetch(`${API}/interactions/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor_type: actorType, intent: 'FRAUD_CALLBACK', audience_ref: 'app-mobile-user' })
       });
       const dataStart = await resStart.json();
@@ -56,36 +58,31 @@ function App() {
       const key = await importJWK(jwks.keys[0], 'EdDSA');
       const result = await jwtVerify(dataStart.token, key, { issuer: 'calixte' });
       
-      setVerified(true);
-      setPayload(result.payload);
+      setVerified(true); setPayload(result.payload);
       const id = String(result.payload.sub);
       setInteractionId(id);
-      setVerifyMsg('Identité cryptographique confirmée.');
-      logAction('✅ Preuve vérifiée en arrière-plan. Affichage du mode sécurisé.');
+      logAction(`✅ Preuve EdDSA vérifiée. Canal sécurisé ouvert.`, 'success');
 
+      // Connexion Temps Réel
       if (esRef.current) esRef.current.close();
       const es = new EventSource(`${API}/interactions/${id}/stream`);
       es.onmessage = (evt) => {
         const data = JSON.parse(evt.data);
         if (data.type === 'STEP_UP') {
-          setPendingActionName(`${data.action}`);
+          setPendingActionName(data.action);
           setPendingConfirmation(data.confirmation_id);
-          logAction(`🔔 PUSH REÇU : Validation requise pour ${data.action}.`);
+          logAction(`🔔 PUSH: Le serveur demande une validation client pour ${data.action}.`, 'warn');
         } else if (data.type === 'ALLOW') {
-          logAction(`ℹ️ INFO PUSH : Le conseiller a pu exécuter ${data.action}.`);
+          logAction(`ℹ️ PUSH: Action serveur autorisée (${data.action}).`);
         } else if (data.type === 'DENY') {
-          logAction(`❌ INFO PUSH : Le serveur a bloqué l'action interdite (${data.action}).`);
-          
-          // DÉCLENCHEMENT DE L'ALERTE ROUGE
-          setScamAlert(`L'appelant a tenté l'action interdite : ${data.action}.\n\nUn conseiller bancaire n'a JAMAIS l'autorisation de vous demander un code de validation (OTP) ou d'initier un virement, peu importe le montant.\n\n⚠️ Ceci est une fraude avérée. RACCROCHEZ IMMÉDIATEMENT.`);
+          logAction(`❌ PUSH: Action interdite bloquée par le serveur (${data.action}).`, 'err');
+          setScamAlert(`L'appelant tente d'exécuter une action interdite : ${data.action}.\n\nUn vrai conseiller bancaire ne demandera JAMAIS cela. Ceci est une fraude, raccrochez immédiatement.`);
         }
       };
       esRef.current = es;
-
     } catch (err) {
       setVerified(false);
-      setVerifyMsg('Preuve absente ou falsifiée.');
-      logAction('❌ Impossible de vérifier l\'appelant.');
+      logAction('❌ Impossible de vérifier l\'appelant. (Faux token ou erreur)', 'err');
     } finally {
       setBusy(false);
     }
@@ -93,32 +90,31 @@ function App() {
 
   function simulateUnknownCall() {
     resetState();
-    logAction('📞 Appel entrant normal (réseau classique, sans preuve de la banque).');
+    setVerified(false); // Mode appel non vérifié
+    logAction('Appel entrant classique. Aucune preuve cryptographique reçue.');
   }
 
   async function simulateCallerAction(action) {
     if (verified !== true) return;
-    logAction(`[API Conseiller] Tente d'initier : ${action}`);
+    logAction(`Le conseiller demande à l'API : ${action}`);
     try {
       await fetch(`${API}/policy/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ interaction_id: interactionId, action })
       });
-    } catch (err) {
-      logAction(`[API Conseiller] Erreur réseau.`);
-    }
+    } catch (err) { logAction(`Erreur réseau (Caller API).`, 'err'); }
   }
 
+  // --- ACTIONS DE L'UTILISATEUR (IN-APP) ---
   async function approveAction() {
     setBusy(true);
     try {
       await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
       setPendingConfirmation('');
-      logAction('✅ L\'utilisateur a approuvé le Step-Up.');
-      alert("L'action a été validée cryptographiquement avec succès.");
+      logAction('✅ L\'utilisateur a approuvé avec succès via l\'App.', 'success');
+      showToast("Opération confirmée et sécurisée.");
     } catch (err) {
-      logAction('Erreur lors de la confirmation.');
+      showToast("Erreur lors de la confirmation.");
     } finally {
       setBusy(false);
     }
@@ -126,88 +122,116 @@ function App() {
 
   function handleUserAction(actionName) {
     if (verified === true && summary.cannot.includes(actionName)) {
-      logAction(`ALERTE : L'utilisateur tente l'action interdite : ${actionName}`);
-      alert(`⚠️ RACCROCHEZ IMMÉDIATEMENT ⚠️\nL'appelant tente de vous manipuler pour faire une action interdite. C'est une fraude.`);
+      logAction(`L'utilisateur tente une action dangereuse (${actionName}) pendant un appel!`, 'err');
+      setScamAlert(`Vous tentez de réaliser une action (${actionName}) alors qu'un conseiller est en ligne.\n\nS'il vous a demandé de le faire, c'est une manipulation. Raccrochez.`);
       return;
     }
-    if (verified !== true) {
-      const isSafe = confirm(`🛡️ RAPPEL DE SÉCURITÉ\n\nVous vous apprêtez à faire une action sensible (${actionName}).\n\nSi un soi-disant "conseiller" au téléphone vous demande de faire cela sans s'être identifié via l'application, C'EST UNE FRAUDE.\n\nÊtes-vous sûr de vouloir continuer cette action vous-même ?`);
-      if (!isSafe) { logAction(`Action annulée par précaution.`); return; }
+    if (verified === false) { // Appel inconnu en cours
+      const isSafe = confirm(`🛡️ SÉCURITÉ\nUn appel non vérifié est en cours. Ne faites aucune opération sensible sous la dictée d'un inconnu. Continuer ?`);
+      if (!isSafe) return;
     }
-    logAction(`Utilisateur initie lui-même: ${actionName}`);
-    alert(`✅ Action exécutée : ${actionName}`);
+    showToast(`Vous avez cliqué sur : ${actionName}`);
   }
 
-  return e('div', { className: 'app' },
-    e('h1', null, Icon('shield'), 'Mon App Bancaire'),
+  // Rendu
+  return e('div', { className: 'demo-container' },
+    
+    // ==========================================
+    // COLONNE GAUCHE : LE TÉLÉPHONE (APP MOBILE)
+    // ==========================================
+    e('div', { className: 'mobile-wrapper' },
+      e('div', { className: 'mobile-device' },
+        
+        // Header de l'app
+        e('div', { className: 'mobile-header' },
+          e('h2', null, 'Bonjour, Alex 👋'),
+          e('p', null, 'Vos comptes sont à jour')
+        ),
 
-    verified === null && e('div', { className: 'alert info' }, Icon('info'), e('div', null, 'Sécurité standard active. Ne donnez jamais vos codes par téléphone.')),
-    verified === false && e('div', { className: 'alert danger' }, Icon('warning'), e('div', null, e('strong', null, 'Appel non vérifié ! '), verifyMsg)),
-    verified === true && e('div', { className: 'alert warning' }, Icon('verified_user'), e('div', null, e('strong', null, `Conseiller Vérifié (${payload?.actor_type}). `), 'Toute action sensible nécessitera une validation dans cette app.')),
+        // Bannière d'appel dynamique
+        verified === true && e('div', { className: 'call-banner verified' }, Icon('verified_user'), 'Appel sécurisé en cours'),
+        verified === false && e('div', { className: 'call-banner unknown' }, Icon('phone_in_talk'), 'Appel entrant inconnu'),
 
-    e('div', { className: 'row', style: { justifyContent: 'center', margin: '2rem 0' } },
-      e('button', { onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('support_agent'), 'Recevoir Appel (Vérifié)'),
-      e('button', { className: 'secondary', onClick: simulateUnknownCall, disabled: busy }, Icon('phone_callback'), 'Recevoir Appel (Inconnu)')
+        // Contenu de l'app
+        e('div', { className: 'mobile-content' },
+          e('div', { className: 'bank-card' },
+            e('div', { style: { fontSize: '0.85rem', opacity: 0.8 } }, 'Compte Courant'),
+            e('div', { className: 'balance' }, '12 450,00 €'),
+            e('div', { style: { fontFamily: 'monospace', opacity: 0.7 } }, '**** **** **** 4092')
+          ),
+
+          e('div', { className: 'action-grid' },
+            e('div', { className: 'action-btn', onClick: () => handleUserAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement'),
+            e('div', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, Icon('chat'), 'Messagerie'),
+            e('div', { className: 'action-btn danger', onClick: () => handleUserAction('FREEZE_CARD') }, Icon('credit_card_off'), 'Bloquer carte'),
+            e('div', { className: 'action-btn danger', onClick: () => handleUserAction('ASK_OTP') }, Icon('password'), 'Code (OTP)')
+          ),
+          
+          e('h3', { style: { fontSize: '1rem', marginTop: '1rem' } }, 'Transactions récentes'),
+          e('div', { style: { fontSize: '0.9rem', color: '#555', padding: '1rem', background: 'white', borderRadius: '8px' } }, 'Netflix - 13,99 €')
+        ),
+
+        // Superposition : Modale Step-Up (Validation)
+        pendingConfirmation && e('div', { className: 'modal-overlay' },
+          e('div', { className: 'modal' },
+            e('div', { style: { color: 'var(--primary)', marginBottom: '1rem' } }, Icon('fingerprint')),
+            e('h3', { style: { margin: '0 0 0.5rem' } }, 'Validation requise'),
+            e('p', { style: { fontSize: '0.85rem', color: '#666' } }, `Autorisez-vous l'action : ${pendingActionName} ?`),
+            e('button', { className: 'modal-btn red', onClick: approveAction, disabled: busy }, 'Autoriser (FaceID)'),
+            e('button', { className: 'modal-btn grey', onClick: () => setPendingConfirmation('') }, 'Annuler')
+          )
+        ),
+
+        // Superposition : Modale Alerte Fraude (Scam)
+        scamAlert && e('div', { className: 'modal-overlay' },
+          e('div', { className: 'modal danger' },
+            e('div', { style: { color: 'var(--danger)', marginBottom: '0.5rem' } }, Icon('warning')),
+            e('h3', { style: { margin: '0 0 0.5rem', color: 'var(--danger)' } }, 'Tentative de Fraude'),
+            e('p', { style: { fontSize: '0.85rem', whiteSpace: 'pre-wrap' } }, scamAlert),
+            e('button', { className: 'modal-btn grey', onClick: resetState }, 'J\'ai raccroché')
+          )
+        ),
+
+        // Notifications (Toasts)
+        e('div', { className: 'toast-container' },
+          toasts.map(t => e('div', { key: t.id, className: 'toast' }, t.msg))
+        )
+      )
     ),
 
-    e('div', { className: 'grid' },
-      // Colonne UTILISATEUR
-      e('div', { className: 'card' },
-        e('h3', { style: { marginTop: 0 } }, 'Ce que je fais (Mon App)'),
-        e('div', { className: 'row', style: { flexDirection: 'column' } },
-          e('button', { className: 'secondary', onClick: () => handleUserAction('FREEZE_CARD') }, Icon('credit_card_off'), 'Bloquer ma carte'),
-          e('button', { className: 'secondary', onClick: () => handleUserAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Faire un virement'),
-          e('button', { className: 'danger', onClick: () => handleUserAction('ASK_OTP') }, Icon('password'), 'Saisir un code de validation')
+    // ==========================================
+    // COLONNE DROITE : CONSOLE D'ADMINISTRATION
+    // ==========================================
+    e('div', { className: 'admin-panel' },
+      
+      // Bloc 1 : Déclenchement des appels
+      e('div', { className: 'admin-card' },
+        e('h3', null, Icon('settings_phone'), '1. Simuler un appel vers le client'),
+        e('p', { style: { fontSize: '0.85rem', color: '#555' } }, 'Déclenche un appel et génère la preuve cryptographique (Token JWT).'),
+        e('div', { className: 'row' },
+          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, 'Appel Vérifié (Banque)'),
+          e('button', { className: 'control-btn', onClick: simulateUnknownCall, disabled: busy }, 'Appel Normal (Arnaqueur)')
         )
       ),
 
-      // Colonne APPELANT
-      e('div', { className: 'card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
-        e('h3', { style: { marginTop: 0 } }, 'Ce que fait le conseiller (API)'),
-        verified ? e(React.Fragment, null,
-          e('div', { style: { fontSize: '0.85rem', marginBottom: '1rem' } }, 
-            e('span', { style: { color: '#0e7a0d', fontWeight: 'bold' } }, 'Peut demander : '), summary.can.join(', '), e('br'),
-            e('span', { style: { color: '#da1e28', fontWeight: 'bold' } }, 'Interdit : '), summary.cannot.join(', ')
-          ),
-          e('div', { className: 'row', style: { flexDirection: 'column' } },
-            e('button', { className: 'secondary', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('gavel'), 'Serveur: Bloquer Carte'),
-            e('button', { className: 'secondary', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('payments'), 'Serveur: Initier un Virement'),
-            e('button', { className: 'secondary', onClick: () => simulateCallerAction('ASK_OTP') }, Icon('password'), 'Serveur: Demander OTP')
-          )
-        ) : e('p', { style: { fontSize: '0.9rem', color: '#666' } }, 'Impossible d\'interagir avec le serveur sans identité.')
-      )
-    ),
+      // Bloc 2 : Actions du serveur (Policy Engine)
+      e('div', { className: 'admin-card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
+        e('h3', null, Icon('admin_panel_settings'), '2. Actions du conseiller (Serveur)'),
+        e('p', { style: { fontSize: '0.85rem', color: '#555' } }, verified ? 'Le canal est ouvert. Le conseiller tente de déclencher des actions via l\'API.' : 'Connectez un appel vérifié pour interagir avec l\'API.'),
+        e('div', { className: 'row' },
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, 'Demander Blocage Carte (Passe)'),
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, 'Demander Virement (Bloqué)'),
+          e('button', { className: 'control-btn', onClick: () => simulateCallerAction('ASK_OTP') }, 'Demander Code OTP (Bloqué)')
+        )
+      ),
 
-    // Modale Step-Up (Blocage de carte)
-    pendingConfirmation && e('div', { className: 'modal-overlay' },
-      e('div', { className: 'modal' },
-        e('h2', null, Icon('error'), 'Validation requise'),
-        e('p', null, `Votre conseiller tente de : `),
-        e('h3', {style: {textAlign: 'center'}}, pendingActionName),
-        e('p', null, 'Confirmez-vous cette action ?'),
-        e('div', { className: 'row', style: { justifyContent: 'flex-end', marginTop: '2rem' } },
-          e('button', { className: 'secondary', onClick: () => setPendingConfirmation('') }, 'Annuler'),
-          e('button', { className: 'danger', onClick: approveAction, disabled: busy }, 'Autoriser')
+      // Bloc 3 : Logs en temps réel
+      e('div', { className: 'admin-card', style: { flex: 1, display: 'flex', flexDirection: 'column' } },
+        e('h3', null, Icon('terminal'), 'Logs d\'audit (Temps Réel)'),
+        e('div', { className: 'logs' },
+          actionLog.map((log, i) => e('div', { key: i, className: log.type }, `[${log.t}] ${log.msg}`))
         )
       )
-    ),
-
-    // NOUVELLE MODALE : Scam Alert (Tentative de fraude détectée)
-    scamAlert && e('div', { className: 'modal-overlay' },
-      e('div', { className: 'modal', style: { borderTop: '8px solid #da1e28' } },
-        e('h2', { style: { color: '#da1e28', margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('warning'), 'ALERTE SÉCURITÉ'),
-        e('p', { style: { whiteSpace: 'pre-wrap', fontWeight: '500', lineHeight: '1.5' } }, scamAlert),
-        e('div', { className: 'row', style: { justifyContent: 'center', marginTop: '1.5rem' } },
-          e('button', { className: 'danger', onClick: () => { resetState(); } }, Icon('phone_disabled'), 'Raccrocher et Bloquer l\'appelant')
-        )
-      )
-    ),
-
-    e('details', null,
-      e('summary', null, '🛠️ Afficher les logs (Temps réel)'),
-      e('ul', { style: { fontSize: '0.85rem', color: '#444' } }, actionLog.map((log, i) => e('li', { key: i }, log))),
-      e('h4', { style: { margin: '1rem 0 0.5rem 0' } }, 'Preuve JWT'),
-      e('textarea', { readOnly: true, value: token })
     )
   );
 }
