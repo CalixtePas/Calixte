@@ -38,8 +38,11 @@ function App() {
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   
-  // Formatage propre du nom de l'appelant
-  const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : 'Conseiller Humain';
+  // NOUVEAU : Formatage dynamique pour la popup et la bannière
+  const isAI = payload?.actor_type === 'AI_AGENT';
+  const actorName = isAI ? 'Agent IA' : 'Conseiller Humain';
+  const callerDescription = isAI ? "Une IA authentifiée" : "Un conseiller authentifié";
+  const pronoun = isAI ? "Elle" : "Il";
 
   const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
   
@@ -206,7 +209,7 @@ function App() {
           e('p', null, 'Dernière connexion : Aujourd\'hui 14:15')
         ),
 
-        verified === true && e('div', { className: 'call-banner verified' }, Icon(payload?.actor_type === 'AI_AGENT' ? 'smart_toy' : 'headset_mic'), `Appel sécurisé : ${actorName}`),
+        verified === true && e('div', { className: 'call-banner verified' }, Icon(isAI ? 'smart_toy' : 'headset_mic'), `Appel sécurisé : ${actorName}`),
 
         e('div', { className: 'mobile-content' },
           e('div', { className: 'bank-card' },
@@ -253,14 +256,14 @@ function App() {
           )
         ),
 
-        // LA FAMEUSE POPUP MISE À JOUR (Humain / IA Agent)
+        // LA POPUP DE CONFIANCE AVEC LE TEXTE MIS A JOUR
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal', style: { borderTop: '6px solid var(--success)' } },
             e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
               e('h3', { style: { margin: 0, color: '#0e7a0d', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' } }, Icon('gavel'), 'Contrat de Confiance'),
               e('button', { className: 'icon-btn-close', onClick: () => setShowPermissionsPopup(false) }, Icon('close'))
             ),
-            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `Un ${actorName} a été authentifié avec succès.\n\nVoici ce qu'il a le droit de faire :`),
+            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `${callerDescription} est en train de vous appeler.\n\n${pronoun} peut :`),
             e('ul', { className: 'permissions-list' },
               summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check_circle'), e('span', null, x))),
               summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('cancel'), e('span', null, x)))
@@ -294,13 +297,12 @@ function App() {
       )
     ),
 
-    // CONSOLE ADMIN MISE À JOUR
+    // CONSOLE ADMIN
     e('div', { className: 'admin-panel' },
       e('div', { className: 'admin-card' },
         e('h3', null, Icon('settings_phone'), '1. Simuler l\'appel vers le client'),
         e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, 'Ouvre un canal sécurisé Castor avec l\'application client.'),
         e('div', { className: 'row' },
-          // NOUVEAU : Deux boutons distincts pour choisir la source de l'appel
           e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('headset_mic'), 'Appel Vérifié (Humain)'),
           e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appel Vérifié (Agent IA)')
         )
