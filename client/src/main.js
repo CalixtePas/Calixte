@@ -4,7 +4,7 @@ import { importJWK, jwtVerify } from 'https://cdn.jsdelivr.net/npm/jose@5.9.6/+e
 
 const API = window.ENV?.API_BASE_URL || 'http://localhost:3001/castor/v1';
 const e = React.createElement;
-const Icon = (name) => e('span', { className: 'material-symbols-outlined icon' }, name);
+const Icon = (name) => e('span', { className: 'material-symbols-outlined icon', style: { fontSize: 'inherit' } }, name);
 
 const RECIPIENTS = [
   'Nouveau bénéficiaire...',
@@ -38,7 +38,6 @@ function App() {
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   
-  // NOUVEAU : Formatage dynamique pour la popup et la bannière
   const isAI = payload?.actor_type === 'AI_AGENT';
   const actorName = isAI ? 'Agent IA' : 'Conseiller Humain';
   const callerDescription = isAI ? "Une IA authentifiée" : "Un conseiller authentifié";
@@ -57,7 +56,6 @@ function App() {
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setPendingConfirmation(''); setPendingActionName(''); setScamAlert('');
     setIsTransferPageOpen(false); setShowPermissionsPopup(false);
-    logAction("Session réinitialisée.", 'info');
   }
 
   // --- ACTIONS DU SIMULATEUR ---
@@ -201,6 +199,19 @@ function App() {
     }
   }
 
+  // --- ACTIONS POUR RACCROCHER ---
+  function endCallClient() {
+    logAction("📞 L'utilisateur a mis fin à l'appel depuis l'application.", 'info');
+    showToast("Session sécurisée terminée.");
+    resetState();
+  }
+
+  function endCallServer() {
+    logAction("📞 L'agent a mis fin à l'appel côté serveur.", 'info');
+    showToast("Le conseiller a raccroché.");
+    resetState();
+  }
+
   return e('div', { className: 'demo-container' },
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
@@ -209,7 +220,22 @@ function App() {
           e('p', null, 'Dernière connexion : Aujourd\'hui 14:15')
         ),
 
-        verified === true && e('div', { className: 'call-banner verified' }, Icon(isAI ? 'smart_toy' : 'headset_mic'), `Appel sécurisé : ${actorName}`),
+        // BANNIÈRE APPEL SÉCURISÉ AVEC BOUTON "FIN DE L'APPEL"
+        verified === true && e('div', { className: 'call-banner verified', style: { justifyContent: 'space-between' } }, 
+          e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.75rem' } },
+            Icon(isAI ? 'smart_toy' : 'headset_mic'), 
+            `Appel sécurisé : ${actorName}`
+          ),
+          e('button', { 
+            onClick: endCallClient,
+            style: { 
+              background: '#da1e28', color: 'white', border: 'none', borderRadius: '50%', 
+              width: '32px', height: '32px', display: 'flex', alignItems: 'center', 
+              justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 5px rgba(218, 30, 40, 0.4)' 
+            },
+            title: "Raccrocher"
+          }, Icon('call_end'))
+        ),
 
         e('div', { className: 'mobile-content' },
           e('div', { className: 'bank-card' },
@@ -256,19 +282,19 @@ function App() {
           )
         ),
 
-        // LA POPUP DE CONFIANCE AVEC LE TEXTE MIS A JOUR
+        // POPUP RÉÉCRITE AVEC DES TERMES PROS ET PLUS CLAIRS
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal', style: { borderTop: '6px solid var(--success)' } },
             e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' } },
-              e('h3', { style: { margin: 0, color: '#0e7a0d', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' } }, Icon('gavel'), 'Contrat de Confiance'),
+              e('h3', { style: { margin: 0, color: '#0e7a0d', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.1rem' } }, Icon('shield_person'), 'Sécurité de l\'appel'),
               e('button', { className: 'icon-btn-close', onClick: () => setShowPermissionsPopup(false) }, Icon('close'))
             ),
-            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `${callerDescription} est en train de vous appeler.\n\n${pronoun} peut :`),
+            e('p', {style: {margin: '0 0 1rem 0', color: '#555', textAlign: 'left', fontSize: '0.9rem', lineHeight: '1.4'}}, `${callerDescription} est en ligne avec vous.\n\nVoici ses habilitations :`),
             e('ul', { className: 'permissions-list' },
               summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check_circle'), e('span', null, x))),
               summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('cancel'), e('span', null, x)))
             ),
-            e('button', { className: 'modal-btn grey', style: { marginTop: '1.5rem' }, onClick: () => setShowPermissionsPopup(false) }, 'J\'ai compris')
+            e('button', { className: 'modal-btn grey', style: { marginTop: '1.5rem' }, onClick: () => setShowPermissionsPopup(false) }, 'Fermer')
           )
         ),
 
@@ -304,7 +330,13 @@ function App() {
         e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, 'Ouvre un canal sécurisé Castor avec l\'application client.'),
         e('div', { className: 'row' },
           e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('headset_mic'), 'Appel Vérifié (Humain)'),
-          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appel Vérifié (Agent IA)')
+          e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appel Vérifié (Agent IA)'),
+          // NOUVEAU : BOUTON POUR RACCROCHER DEPUIS LE SERVEUR
+          verified === true && e('button', { 
+            className: 'control-btn', 
+            style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, 
+            onClick: endCallServer 
+          }, Icon('call_end'), 'Fin de l\'appel')
         )
       ),
 
