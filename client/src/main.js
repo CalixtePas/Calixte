@@ -21,6 +21,9 @@ function App() {
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
   
+  // NOUVEL ÉTAT : Gestion du statut de la carte
+  const [isCardFrozen, setIsCardFrozen] = useState(false);
+  
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
   
   const [isTransferPageOpen, setIsTransferPageOpen] = useState(false);
@@ -41,7 +44,6 @@ function App() {
   const isAI = payload?.actor_type === 'AI_AGENT';
   const actorName = isAI ? 'Agent IA' : 'Conseiller';
   const callerDescription = isAI ? "Une IA authentifiée" : "Un conseiller authentifié";
-  const pronoun = isAI ? "Elle" : "Il";
 
   const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
   
@@ -130,7 +132,12 @@ function App() {
       setPendingConfirmation('');
       logAction('✅ Validation biométrique envoyée.', 'success');
       showToast("Action confirmée via FaceID.");
-      if (pendingActionName === 'FREEZE_CARD') showToast("Carte bloquée.");
+      
+      // On bloque visuellement la carte si c'était l'action demandée par le serveur
+      if (pendingActionName === 'FREEZE_CARD') {
+        setIsCardFrozen(true);
+        showToast("Carte bloquée.");
+      }
     } catch (err) {
       showToast("Erreur de validation.");
     } finally {
@@ -164,6 +171,10 @@ function App() {
           return;
       }
 
+      // Traitement direct si on est en appel vérifié et que l'action est autorisée
+      if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
+      if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
+
       showToast(`Action exécutée : ${actionName}`);
       return;
     }
@@ -182,7 +193,14 @@ function App() {
     if (!isSafe) return;
 
     logAction(`✅ Action validée : ${actionName}`, 'success');
-    if (actionName === 'WIRE_TRANSFER') {
+    
+    if (actionName === 'FREEZE_CARD') {
+      setIsCardFrozen(true);
+      showToast("Carte bloquée avec succès.");
+    } else if (actionName === 'UNFREEZE_CARD') {
+      setIsCardFrozen(false);
+      showToast("Carte débloquée.");
+    } else if (actionName === 'WIRE_TRANSFER') {
       setBalance(prev => prev - finalAmount);
       setTransferAmount('');
       setIsTransferPageOpen(false);
@@ -213,7 +231,6 @@ function App() {
           e('div', { className: 'profile-pic' }, Icon('person'))
         ),
 
-        // BANNIÈRE APPEL SÉCURISÉ (Plus discrète et "pill-shape")
         verified === true && e('div', { className: 'call-banner verified' }, 
           e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } },
             Icon('lock'), `Appel : ${actorName}`
@@ -222,7 +239,10 @@ function App() {
         ),
 
         e('div', { className: 'mobile-content' },
-          e('div', { className: 'bank-card' },
+          
+          // LA CARTE BANCAIRE (Gestion de l'état bloqué)
+          e('div', { className: `bank-card ${isCardFrozen ? 'frozen' : ''}` },
+            isCardFrozen && e('div', { className: 'frozen-badge' }, Icon('ac_unit'), 'BLOQUÉE'),
             e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
             e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
             e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** **** 4092')
@@ -231,7 +251,16 @@ function App() {
           e('div', { className: 'action-grid' },
             e('button', { className: 'action-btn', onClick: () => setIsTransferPageOpen(true) }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
             e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-            e('button', { className: 'action-btn', onClick: () => handleUserAction('FREEZE_CARD') }, e('div', {className: 'icon'}, Icon('ac_unit')), 'Bloquer'),
+            
+            // BOUTON DYNAMIQUE BLOQUER / DÉBLOQUER
+            e('button', { 
+              className: `action-btn`, 
+              onClick: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') 
+            }, 
+              e('div', {className: 'icon', style: { color: isCardFrozen ? 'var(--primary)' : 'var(--danger)' }}, Icon(isCardFrozen ? 'lock_open' : 'ac_unit')), 
+              isCardFrozen ? 'Débloquer' : 'Bloquer'
+            ),
+            
             e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code')
           ),
           
@@ -266,7 +295,6 @@ function App() {
           )
         ),
 
-        // 1. BOTTOM SHEET : SECURITE DE L'APPEL (Remplace la popup carrée)
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
@@ -279,7 +307,6 @@ function App() {
           )
         ),
 
-        // 2. BOTTOM SHEET : VALIDATION REQUISE (Step-up FaceID)
         pendingConfirmation && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('div', { style: { textAlign: 'center' } },
@@ -292,7 +319,6 @@ function App() {
           )
         ),
 
-        // 3. BOTTOM SHEET : ALERTE FRAUDE
         scamAlert && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('h3', { className: 'modal-title', style: { color: 'var(--danger)' } }, Icon('warning'), 'Arrêtez tout'),
@@ -307,7 +333,6 @@ function App() {
       )
     ),
 
-    // CONSOLE ADMIN (Inchangée)
     e('div', { className: 'admin-panel' },
       e('div', { className: 'admin-card' },
         e('h3', null, Icon('settings_phone'), '1. Simuler l\'appel vers le client'),
