@@ -10,8 +10,7 @@ const RECIPIENTS = [
   'Nouveau bénéficiaire...',
   'Bailleur (Loyer Mensuel)',
   'Maître Leblanc (Notaire Immo)',
-  'Jean Dupont (Remboursement)',
-  'Compte Épargne Externe'
+  'Jean Dupont (Remboursement)'
 ];
 
 function App() {
@@ -20,13 +19,22 @@ function App() {
   const [verified, setVerified] = useState(null); 
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
-  const [isCardFrozen, setIsCardFrozen] = useState(false);
   
+  // États de la carte bancaire
+  const [isCardFrozen, setIsCardFrozen] = useState(false);
+  const [onlinePayments, setOnlinePayments] = useState(true);
+  
+  // Navigation
+  const [activePage, setActivePage] = useState('HOME'); // HOME, TRANSFER, CARD
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
-  const [isTransferPageOpen, setIsTransferPageOpen] = useState(false);
+  
+  // États Virement
   const [transferAmount, setTransferAmount] = useState(''); 
   const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
+  const [newBeneficiaryName, setNewBeneficiaryName] = useState('');
+  const [newBeneficiaryIban, setNewBeneficiaryIban] = useState('');
   
+  // Modales
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
   const [scamAlert, setScamAlert] = useState('');
@@ -42,7 +50,6 @@ function App() {
   const actorName = isAI ? 'Agent IA' : 'Conseiller';
   const callerDescription = isAI ? "Une IA authentifiée" : "Un conseiller authentifié";
 
-  // Des logs orientés CRM
   const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
   
   const showToast = (msg) => {
@@ -55,7 +62,7 @@ function App() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setPendingConfirmation(''); setPendingActionName(''); setScamAlert('');
-    setIsTransferPageOpen(false); setShowPermissionsPopup(false);
+    setActivePage('HOME'); setShowPermissionsPopup(false);
   }
 
   // --- ACTIONS DU CRM ---
@@ -96,8 +103,8 @@ function App() {
           logAction(`ℹ️ Action autorisée par le Policy Engine (${data.action}).`);
           showToast(`Action validée : ${data.action}`);
         } else if (data.type === 'DENY') {
-          logAction(`❌ Rejet du serveur : Action bloquée par la politique de sécurité (${data.action}).`, 'err');
-          setScamAlert(`ALERTE SÉCURITÉ\n\nL'appelant tente une opération bloquée par votre contrat (${data.action}).\n\nCeci est une fraude, raccrochez immédiatement.`);
+          logAction(`❌ Rejet du serveur : Action bloquée par la politique (${data.action}).`, 'err');
+          setScamAlert(`ALERTE SÉCURITÉ\n\nL'appelant tente une opération bloquée par la sécurité serveur (${data.action}).\n\nCeci est une fraude, raccrochez immédiatement.`);
         }
       };
       esRef.current = es;
@@ -127,12 +134,11 @@ function App() {
     try {
       await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
       setPendingConfirmation('');
-      logAction('✅ Client a validé l\'opération (Biométrie confirmée).', 'success');
+      logAction('✅ Client a validé l\'opération.', 'success');
       showToast("Action confirmée via FaceID.");
       
       if (pendingActionName === 'FREEZE_CARD') {
         setIsCardFrozen(true);
-        showToast("Carte bloquée.");
       }
     } catch (err) {
       showToast("Erreur de validation.");
@@ -143,6 +149,7 @@ function App() {
 
   function handleUserAction(actionName) {
     let finalAmount = 0;
+    const isNewBeneficiary = transferRecipient === RECIPIENTS[0];
 
     if (actionName === 'WIRE_TRANSFER') {
       finalAmount = parseFloat(transferAmount);
@@ -150,35 +157,56 @@ function App() {
         showToast("Saisissez un montant valide.");
         return;
       }
+      if (isNewBeneficiary && (!newBeneficiaryName || !newBeneficiaryIban)) {
+        showToast("Veuillez remplir les informations du bénéficiaire.");
+        return;
+      }
     }
 
     logAction(`Le client initie : ${actionName}...`);
 
+    // ==========================================
+    // LOGIQUE DE SÉCURITÉ (APPEL EN COURS)
+    // ==========================================
     if (verified === true) {
+      
+      // LA NOUVELLE RÈGLE : Nouveau bénéficiaire + Appel = FRAUDE IMMÉDIATE (peu importe le montant)
+      if (actionName === 'WIRE_TRANSFER' && isNewBeneficiary) {
+          logAction(`❌ ALERTE CRITIQUE : Ajout de bénéficiaire pendant un appel !`, 'err');
+          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un nouveau bénéficiaire IBAN alors qu'un conseiller est en ligne.\n\nC'est la méthode n°1 des fraudeurs pour vider votre compte. RACCROCHEZ IMMÉDIATEMENT.`);
+          setActivePage('HOME');
+          return;
+      }
+
       if (summary.cannot.includes(actionName)) {
           setScamAlert(`ATTENTION\n\nL'appelant tente de vous faire exécuter une action interdite (${actionName}). Raccrochez.`);
-          setIsTransferPageOpen(false);
+          setActivePage('HOME');
           return;
       }
 
       if (actionName === 'WIRE_TRANSFER') {
           setScamAlert(`ALERTE FRAUDE\n\nVous tentez d'envoyer ${finalAmount.toFixed(2)}€ alors qu'un appel est en cours.\n\nSi l'interlocuteur vous le demande, c'est une manipulation. Raccrochez.`);
-          setIsTransferPageOpen(false);
+          setActivePage('HOME');
           return;
       }
 
+      // Actions in-app autorisées
       if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
       if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
+      if (actionName === 'REPORT_LOST') { setIsCardFrozen(true); showToast("Carte déclarée volée/perdue. Nouvelle carte commandée."); setActivePage('HOME'); return;}
 
       showToast(`Action exécutée : ${actionName}`);
       return;
     }
 
-    if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50) {
+    // ==========================================
+    // LOGIQUE STANDARD (HORS APPEL)
+    // ==========================================
+    if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50 && !isNewBeneficiary) {
       logAction(`✅ Virement standard validé (<50€).`, 'success');
       setBalance(prev => prev - finalAmount);
       setTransferAmount('');
-      setIsTransferPageOpen(false);
+      setActivePage('HOME');
       showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`);
       return;
     }
@@ -189,17 +217,16 @@ function App() {
 
     logAction(`✅ Opération client validée : ${actionName}`, 'success');
     
-    if (actionName === 'FREEZE_CARD') {
-      setIsCardFrozen(true);
-      showToast("Carte bloquée avec succès.");
-    } else if (actionName === 'UNFREEZE_CARD') {
-      setIsCardFrozen(false);
-      showToast("Carte débloquée.");
-    } else if (actionName === 'WIRE_TRANSFER') {
+    if (actionName === 'FREEZE_CARD') { setIsCardFrozen(true); showToast("Carte bloquée."); } 
+    else if (actionName === 'UNFREEZE_CARD') { setIsCardFrozen(false); showToast("Carte débloquée."); } 
+    else if (actionName === 'REPORT_LOST') { setIsCardFrozen(true); showToast("Carte bloquée définitivement."); setActivePage('HOME'); }
+    else if (actionName === 'WIRE_TRANSFER') {
       setBalance(prev => prev - finalAmount);
       setTransferAmount('');
-      setIsTransferPageOpen(false);
-      showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`);
+      setNewBeneficiaryName(''); setNewBeneficiaryIban('');
+      setActivePage('HOME');
+      const targetName = isNewBeneficiary ? newBeneficiaryName : transferRecipient;
+      showToast(`Virement de ${finalAmount.toFixed(2)} € vers ${targetName} effectué.`);
     } else {
       showToast(`Action exécutée : ${actionName}`);
     }
@@ -220,7 +247,7 @@ function App() {
   return e('div', { className: 'demo-container' },
     
     // ===============================================
-    // GAUCHE : APP MOBILE DU CLIENT (iOS/Android)
+    // GAUCHE : APP MOBILE
     // ===============================================
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
@@ -238,55 +265,120 @@ function App() {
         ),
 
         e('div', { className: 'mobile-content' },
-          e('div', { className: `bank-card ${isCardFrozen ? 'frozen' : ''}` },
+          e('div', { className: `bank-card ${isCardFrozen ? 'frozen' : ''}`, onClick: () => setActivePage('CARD') },
             isCardFrozen && e('div', { className: 'frozen-badge' }, Icon('ac_unit'), 'BLOQUÉE'),
             e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
             e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
-            e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** **** 4092')
+            e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end'} },
+              e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** **** 4092'),
+              e('div', { style: { fontSize: '0.75rem', opacity: 0.8 } }, 'Gérer ma carte >')
+            )
           ),
 
           e('div', { className: 'action-grid' },
-            e('button', { className: 'action-btn', onClick: () => setIsTransferPageOpen(true) }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
+            e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
+            e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
             e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-            e('button', { className: `action-btn`, onClick: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }, 
-              e('div', {className: 'icon', style: { color: isCardFrozen ? 'var(--primary)' : 'var(--danger)' }}, Icon(isCardFrozen ? 'lock_open' : 'ac_unit')), 
-              isCardFrozen ? 'Débloquer' : 'Bloquer'
-            ),
             e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code')
           ),
           
-          e('h3', { style: { fontSize: '1rem', marginTop: '2rem', marginBottom: '1rem' } }, 'Dernières opérations'),
+          e('h3', { style: { fontSize: '1rem', marginTop: '1rem', marginBottom: '1rem' } }, 'Dernières opérations'),
           e('div', { className: 'tx-list' }, 
             e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
             e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
           )
         ),
 
-        // PAGES ET MODALES MOBILE
-        isTransferPageOpen && e('div', { className: 'mobile-page' },
+        // ===============================================
+        // PAGE : NOUVEAU VIREMENT
+        // ===============================================
+        activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
           e('div', { className: 'page-header' },
-            e('div', { className: 'back-btn', onClick: () => setIsTransferPageOpen(false) }, Icon('arrow_back')),
+            e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')),
             e('h3', null, 'Virement')
           ),
           e('div', { className: 'page-content' },
             e('div', { className: 'form-group' },
-              e('label', null, 'Depuis'),
+              e('label', null, 'Compte à débiter'),
               e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toFixed(2)} €)`))
             ),
             e('div', { className: 'form-group' },
-              e('label', null, 'Vers'),
+              e('label', null, 'Bénéficiaire'),
               e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) },
                 RECIPIENTS.map(r => e('option', { key: r, value: r }, r))
               )
             ),
+            
+            // Apparaît uniquement si on choisit "Nouveau bénéficiaire..."
+            transferRecipient === RECIPIENTS[0] && e(React.Fragment, null, 
+              e('div', { className: 'form-group' },
+                e('label', null, 'Nom du bénéficiaire'),
+                e('input', { type: 'text', placeholder: 'Ex: Garage Martin', value: newBeneficiaryName, onChange: (evt) => setNewBeneficiaryName(evt.target.value) })
+              ),
+              e('div', { className: 'form-group' },
+                e('label', null, 'IBAN'),
+                e('input', { type: 'text', placeholder: 'FR76...', value: newBeneficiaryIban, onChange: (evt) => setNewBeneficiaryIban(evt.target.value) })
+              )
+            ),
+
             e('div', { className: 'form-group' },
               e('label', null, 'Montant (€)'),
               e('input', { type: 'number', min: '1', placeholder: '0.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })
             ),
-            e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Continuer')
+            e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Confirmer le virement')
           )
         ),
 
+        // ===============================================
+        // PAGE : GESTION DE LA CARTE BANCAIRE
+        // ===============================================
+        activePage === 'CARD' && e('div', { className: 'mobile-page' },
+          e('div', { className: 'page-header' },
+            e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')),
+            e('h3', null, 'Gérer ma carte')
+          ),
+          e('div', { className: 'page-content' },
+            e('div', { className: `bank-card ${isCardFrozen ? 'frozen' : ''}`, style: { margin: '0 0 2rem 0', boxShadow: '0 20px 40px rgba(0,0,0,0.15)' } },
+              isCardFrozen && e('div', { className: 'frozen-badge' }, Icon('ac_unit'), 'BLOQUÉE'),
+              e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Visa Premier'),
+              e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, '**** **** **** 4092'),
+              e('div', { style: { display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', opacity: 0.8, fontSize: '0.9rem' } },
+                e('span', null, 'ALEXANDRE DUPONT'), e('span', null, '12/28')
+              )
+            ),
+
+            e('div', { className: 'menu-list' },
+              e('div', { className: 'menu-item' },
+                e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('speed')), e('div', null, e('h4', null, 'Plafonds de paiement'), e('p', null, 'Utilisé : 450€ / 2500€'))),
+                Icon('chevron_right')
+              ),
+              e('div', { className: 'menu-item' },
+                e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('language')), e('div', null, e('h4', null, 'Paiements sur internet'), e('p', null, onlinePayments ? 'Activés' : 'Désactivés'))),
+                e('label', { className: 'switch' }, 
+                  e('input', { type: 'checkbox', checked: onlinePayments, onChange: () => setOnlinePayments(!onlinePayments) }),
+                  e('span', { className: 'slider' })
+                )
+              )
+            ),
+
+            e('div', { className: 'menu-list' },
+              e('div', { className: 'menu-item' },
+                e('div', { className: 'menu-item-info' }, 
+                  e('div', { className: 'icon', style: { background: isCardFrozen ? '#f0f4ff' : '#fff0f0', color: isCardFrozen ? 'var(--primary)' : 'var(--danger)' } }, Icon(isCardFrozen ? 'lock_open' : 'ac_unit')), 
+                  e('div', null, e('h4', null, isCardFrozen ? 'Débloquer la carte' : 'Bloquer temporairement'), e('p', null, isCardFrozen ? 'Réactiver les paiements' : 'En cas de doute'))
+                ),
+                e('label', { className: 'switch' }, 
+                  e('input', { type: 'checkbox', checked: isCardFrozen, onChange: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }),
+                  e('span', { className: 'slider' })
+                )
+              )
+            ),
+
+            e('button', { className: 'btn-danger', onClick: () => handleUserAction('REPORT_LOST') }, Icon('warning'), 'Signaler volée ou perdue')
+          )
+        ),
+
+        // MODALES (Bottom Sheets)
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
@@ -331,7 +423,6 @@ function App() {
     e('div', { className: 'admin-panel' },
       e('h2', { className: 'crm-header' }, Icon('support_agent'), 'Portail Conseiller (CRM)'),
 
-      // FICHE CLIENT & AUTHENTIFICATION
       e('div', { className: 'admin-card', style: { borderTop: '4px solid var(--primary)' } },
         e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
           e('div', null,
@@ -350,7 +441,6 @@ function App() {
         )
       ),
 
-      // ACTIONS DISTANTES DU CRM
       e('div', { className: 'admin-card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
         e('h3', null, Icon('dashboard_customize'), 'Actions Conseiller (Distantes)'),
         e('p', { style: { fontSize: '0.85rem', color: '#555', margin: 0 } }, verified ? 'Le canal est sécurisé. Vos actions sont limitées par la politique du serveur.' : 'Veuillez authentifier le client pour activer les actions.'),
@@ -361,7 +451,6 @@ function App() {
         )
       ),
 
-      // PISTE D'AUDIT
       e('div', { className: 'admin-card', style: { flex: 1, display: 'flex', flexDirection: 'column' } },
         e('h3', null, Icon('history'), 'Piste d\'audit (Compliance)'),
         e('div', { className: 'logs' },
