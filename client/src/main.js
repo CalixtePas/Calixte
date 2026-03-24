@@ -22,7 +22,7 @@ function App() {
   
   // États de la carte
   const [isCardFrozen, setIsCardFrozen] = useState(false);
-  const [isCardCanceled, setIsCardCanceled] = useState(false); // NOUVEAU: Opposition irréversible
+  const [isCardCanceled, setIsCardCanceled] = useState(false); 
   const [onlinePayments, setOnlinePayments] = useState(true);
   
   // Navigation
@@ -38,7 +38,7 @@ function App() {
   // Modales
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
-  const [localFaceIdAction, setLocalFaceIdAction] = useState(null); // NOUVEAU: FaceID client
+  const [localFaceIdAction, setLocalFaceIdAction] = useState(null); 
   
   const [scamAlert, setScamAlert] = useState('');
   const [toasts, setToasts] = useState([]);
@@ -123,7 +123,7 @@ function App() {
     } catch (err) {}
   }
 
-  // --- ACTIONS CLIENT (MODALES FACE ID) ---
+  // --- ACTIONS CLIENT ---
   async function approveServerAction() {
     setBusy(true);
     try {
@@ -147,7 +147,7 @@ function App() {
       }
       setLocalFaceIdAction(null);
       setBusy(false);
-    }, 800); // Faux délai FaceID pour le réalisme
+    }, 800); 
   }
 
   function handleUserAction(actionName) {
@@ -191,6 +191,8 @@ function App() {
     else if (actionName === 'WIRE_TRANSFER') {
       setBalance(prev => prev - finalAmount); setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
       setActivePage('HOME'); showToast(`Virement envoyé.`);
+    } else {
+      showToast(`Action exécutée : ${actionName}`);
     }
   }
 
@@ -216,7 +218,6 @@ function App() {
         ),
 
         e('div', { className: 'mobile-content' },
-          // CARTE ACCUEIL (Grise et rouge si annulée)
           e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, onClick: () => setActivePage('CARD') },
             (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
             e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
@@ -227,16 +228,12 @@ function App() {
             )
           ),
 
+          // RETOUR DU BOUTON OTP !
           e('div', { className: 'action-grid' },
             e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
             e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Carte'),
             e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-            
-            // Le bouton rapide Bloquer/Débloquer devient "Invalide" si la carte est en opposition
-            e('button', { className: `action-btn`, onClick: () => isCardCanceled ? showToast("Carte en opposition définitive") : handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }, 
-              e('div', {className: 'icon', style: { color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') }}, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), 
-              isCardCanceled ? 'Invalide' : (isCardFrozen ? 'Débloquer' : 'Bloquer')
-            )
+            e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
           ),
           
           e('h3', { style: { fontSize: '1rem', marginTop: '1rem', marginBottom: '1rem' } }, 'Dernières opérations'),
@@ -310,7 +307,6 @@ function App() {
                   e('div', { className: 'icon', style: { background: isCardCanceled ? '#eee' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), 
                   e('div', null, e('h4', null, isCardCanceled ? 'Opposition définitive' : (isCardFrozen ? 'Débloquer la carte' : 'Bloquer temporairement')), e('p', null, isCardCanceled ? 'Carte invalide' : (isCardFrozen ? 'Réactiver les paiements' : 'En cas de doute')))
                 ),
-                // L'interrupteur disparaît si la carte est en opposition
                 isCardCanceled ? null : e('label', { className: 'switch' }, e('input', { type: 'checkbox', checked: isCardFrozen, onChange: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }), e('span', { className: 'slider' }))
               )
             ),
@@ -319,7 +315,7 @@ function App() {
           )
         ),
 
-        // MODALES (Bottom Sheets unifiés)
+        // MODALES
         showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
@@ -332,7 +328,6 @@ function App() {
           )
         ),
 
-        // FaceID Unifié (Sert pour l'API Serveur OU pour l'Opposition Locale)
         (pendingConfirmation || localFaceIdAction) && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('div', { style: { textAlign: 'center' } },
