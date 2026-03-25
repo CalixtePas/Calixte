@@ -15,23 +15,21 @@ function App() {
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
   
-  // États de la carte et du téléphone
   const [isCardFrozen, setIsCardFrozen] = useState(false);
   const [isCardCanceled, setIsCardCanceled] = useState(false); 
-  const [isScreenShared, setIsScreenShared] = useState(false); // Mode AnyDesk
+  const [isScreenShared, setIsScreenShared] = useState(false); 
   
-  // Navigation & UI
-  const [activePage, setActivePage] = useState('LOCKED'); // LOCKED, HOME, TRANSFER, CARD
-  const [adminTab, setAdminTab] = useState('CRM'); // CRM, CISO
+  const [activePage, setActivePage] = useState('LOCKED'); 
+  const [adminTab, setAdminTab] = useState('CRM'); 
   const [currentTime, setCurrentTime] = useState('');
   const [hasPushNotif, setHasPushNotif] = useState(false);
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
   
-  // Formulaires
   const [transferAmount, setTransferAmount] = useState(''); 
   const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
+  const [newBeneficiaryName, setNewBeneficiaryName] = useState('');
+  const [newBeneficiaryIban, setNewBeneficiaryIban] = useState('');
   
-  // Modales
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
   const [localFaceIdAction, setLocalFaceIdAction] = useState(null); 
@@ -45,11 +43,10 @@ function App() {
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : 'Conseiller';
 
-  // Horloge pour l'écran de verrouillage
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
     updateTime();
-    const interval = setInterval(updateTime, 10000);
+    const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -63,7 +60,6 @@ function App() {
     setActivePage('LOCKED'); setShowPermissionsPopup(false); setHasPushNotif(false); setIsScreenShared(false);
   }
 
-  // --- ACTIONS CRM ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
     logAction(`Initialisation du protocole Castor (${actorType})...`);
@@ -82,7 +78,6 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // SCÉNARIO : Le téléphone est verrouillé, on envoie la notification Push
       setActivePage('LOCKED');
       setHasPushNotif(true);
       logAction(`✅ Handshake réussi. Notification Push envoyée au client.`, 'success');
@@ -115,12 +110,11 @@ function App() {
     else logAction(`Arrêt du partage d'écran.`, 'info');
   }
 
-  // --- ANIMATION FACE ID ET DÉVERROUILLAGE ---
   function executeFaceIdScan(onSuccess) {
     setScanState('scanning'); setBusy(true);
     setTimeout(() => {
       setScanState('success');
-      setTimeout(() => { onSuccess(); setScanState('idle'); setBusy(false); }, 500);
+      setTimeout(() => { onSuccess(); setScanState('idle'); setBusy(false); }, 600); // Délai de réussite plus long pour admirer le vert
     }, 1200);
   }
 
@@ -128,7 +122,8 @@ function App() {
     executeFaceIdScan(() => {
       setHasPushNotif(false);
       setActivePage('HOME');
-      setShowPermissionsPopup(true); // Affiche le contrat de confiance dès l'ouverture
+      // Petit délai pour laisser l'app s'afficher avant que le bottom sheet ne monte
+      setTimeout(() => setShowPermissionsPopup(true), 300);
     });
   }
 
@@ -188,38 +183,35 @@ function App() {
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
         
-        // ECRAN DE VERROUILLAGE
         activePage === 'LOCKED' && e('div', { className: 'lock-screen', onClick: () => !hasPushNotif && setLocalFaceIdAction('UNLOCK_APP') },
           e('div', { className: 'clock' }, currentTime),
           hasPushNotif && e('div', { className: 'push-notif', onClick: (e) => { e.stopPropagation(); openAppFromPush(); } },
-            e('div', { className: 'push-header' }, Icon('shield_person'), 'CASTORBANK'),
+            e('div', { className: 'push-header' }, Icon('shield_person'), 'CASTORBANK', e('span', {style: {marginLeft:'auto', fontWeight:'normal', textTransform:'none'}}, 'maintenant')),
             e('p', { className: 'push-title' }, `Appel sécurisé : ${actorName}`),
             e('p', { className: 'push-body' }, 'Touchez pour ouvrir et vérifier l\'identité de l\'appelant.')
           ),
-          !hasPushNotif && e('div', { style: { position: 'absolute', bottom: '2rem', fontSize: '0.8rem', opacity: 0.8 } }, 'Touchez pour déverrouiller')
+          !hasPushNotif && e('div', { style: { position: 'absolute', bottom: '3rem', fontSize: '0.85rem', opacity: 0.9, fontWeight: 500 } }, 'Touchez pour déverrouiller')
         ),
 
-        // ECRAN ANYDESK (Protection)
         isScreenShared && e('div', { className: 'privacy-screen' },
           e('div', { className: 'icon' }, Icon('visibility_off')),
           e('h3', null, 'Partage d\'écran détecté'),
-          e('p', null, 'Pour votre sécurité, CastorBank a masqué vos données bancaires. Aucun "conseiller" ne vous demandera jamais d\'installer AnyDesk ou TeamViewer.')
+          e('p', null, 'Pour votre sécurité, CastorBank a masqué vos données bancaires. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
         ),
 
-        // APPLICATION NORMALE
         e('div', { className: 'mobile-header' }, e('h2', null, 'CastorBank'), e('div', { className: 'profile-pic' }, Icon('person'))),
 
-        verified === true && e('div', { className: 'call-banner verified' }, 
-          e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('lock'), `Appel : ${actorName}`),
+        verified === true && activePage !== 'LOCKED' && e('div', { className: 'call-banner verified' }, 
+          e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.6rem' } }, Icon('lock'), `Appel : ${actorName}`),
           e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
         ),
 
         e('div', { className: 'mobile-content' },
           e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, onClick: () => setActivePage('CARD') },
             (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
-            e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
+            e('div', { style: { fontSize: '0.95rem', opacity: 0.9, fontWeight: 500 } }, 'Compte Courant'),
             e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
-            e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end'} }, e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092'), e('div', { style: { fontSize: '0.75rem', opacity: 0.8 } }, 'Gérer >'))
+            e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end'} }, e('div', { style: { fontFamily: 'monospace', opacity: 0.7, fontSize: '0.85rem' } }, '**** **** 4092'), e('div', { style: { fontSize: '0.8rem', opacity: 0.9, fontWeight:500 } }, 'Gérer >'))
           ),
 
           e('div', { className: 'action-grid' },
@@ -229,10 +221,10 @@ function App() {
             e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
           ),
           
-          e('h3', { style: { fontSize: '1rem', marginTop: '1rem', marginBottom: '1rem' } }, 'Opérations récentes'),
+          e('h3', { style: { fontSize: '1.1rem', marginTop: '1.5rem', marginBottom: '1rem', fontWeight: 700 } }, 'Opérations récentes'),
           e('div', { className: 'tx-list' }, 
             e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
-            e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
+            e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)', fontWeight: 600}}, '+ 2 150,00 €'))
           )
         ),
 
@@ -241,6 +233,7 @@ function App() {
           e('div', { className: 'page-content' },
             e('div', { className: 'form-group' }, e('label', null, 'Depuis'), e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toFixed(2)} €)`))),
             e('div', { className: 'form-group' }, e('label', null, 'Vers'), e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) }, RECIPIENTS.map(r => e('option', { key: r, value: r }, r)))),
+            transferRecipient === RECIPIENTS[0] && e(React.Fragment, null, e('div', { className: 'form-group' }, e('label', null, 'Nom'), e('input', { type: 'text', placeholder: 'Ex: Garage', value: newBeneficiaryName, onChange: (evt) => setNewBeneficiaryName(evt.target.value) })), e('div', { className: 'form-group' }, e('label', null, 'IBAN'), e('input', { type: 'text', placeholder: 'FR76...', value: newBeneficiaryIban, onChange: (evt) => setNewBeneficiaryIban(evt.target.value) }))),
             e('div', { className: 'form-group' }, e('label', null, 'Montant (€)'), e('input', { type: 'number', min: '1', placeholder: '0.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })),
             e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Confirmer')
           )
@@ -249,13 +242,13 @@ function App() {
         activePage === 'CARD' && e('div', { className: 'mobile-page' },
           e('div', { className: 'page-header' }, e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), e('h3', null, 'Ma carte')),
           e('div', { className: 'page-content' },
-            e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, style: { margin: '0 0 2rem 0', cursor: 'default' } },
+            e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, style: { margin: '0 0 2rem 0', cursor: 'default', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' } },
               (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
-              e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Visa Premier'),
-              e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX' : '**** **** 4092')
+              e('div', { style: { fontSize: '0.95rem', opacity: 0.9, fontWeight: 500 } }, 'Visa Premier'),
+              e('div', { className: 'balance', style: { fontSize: '1.6rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX' : '**** **** 4092')
             ),
             e('div', { className: 'menu-list' },
-              e('div', { className: 'menu-item' }, e('div', { className: 'menu-item-info' }, e('div', { className: 'icon', style: { background: isCardCanceled ? '#eee' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), e('div', null, e('h4', null, isCardCanceled ? 'Opposition' : (isCardFrozen ? 'Débloquer' : 'Bloquer temporairement')))),
+              e('div', { className: 'menu-item' }, e('div', { className: 'menu-item-info' }, e('div', { className: 'icon', style: { background: isCardCanceled ? '#f2f2f7' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#8e8e93' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), e('div', null, e('h4', null, isCardCanceled ? 'Opposition' : (isCardFrozen ? 'Débloquer' : 'Bloquer temporairement')))),
                 isCardCanceled ? null : e('label', { className: 'switch' }, e('input', { type: 'checkbox', checked: isCardFrozen, onChange: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }), e('span', { className: 'slider' }))
               )
             ),
@@ -263,11 +256,11 @@ function App() {
           )
         ),
 
-        // MODALES GLOBALES
-        showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
+        // MODALES AVEC BLUR
+        showPermissionsPopup && verified === true && activePage !== 'LOCKED' && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
-            e('p', {style: {color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem'}}, `${isAI?"Une IA":"Un conseiller"} est en ligne. Ses actions sont limitées :`),
+            e('p', {style: {color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1.5rem', lineHeight: '1.5'}}, `${isAI?"Une IA":"Un conseiller"} est en ligne. Ses actions sont limitées :`),
             e('ul', { className: 'permissions-list' }, summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check'), e('span', null, x))), summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('close'), e('span', null, x)))),
             e('button', { className: 'modal-btn primary', onClick: () => setShowPermissionsPopup(false) }, 'Continuer')
           )
@@ -277,8 +270,8 @@ function App() {
           e('div', { className: 'modal' },
             e('div', { style: { textAlign: 'center' } },
               e('div', { className: `face-id-wrapper ${scanState}` }, e('div', { className: 'face-id-icon' }, Icon(scanState === 'success' ? 'check_circle' : 'face')), e('div', { className: 'face-id-scanner' })),
-              e('h3', { className: 'modal-title', style: { justifyContent: 'center' } }, scanState === 'success' ? 'Vérifié' : 'Face ID requis'),
-              e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '2rem' } }, `Autoriser : ${pendingConfirmation ? pendingActionName : 'Déverrouillage'} ?`),
+              e('h3', { className: 'modal-title', style: { justifyContent: 'center' } }, scanState === 'success' ? 'Vérifié' : 'Face ID'),
+              e('p', { style: { color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '2rem' } }, `Autoriser : ${pendingConfirmation ? pendingActionName : (localFaceIdAction === 'UNLOCK_APP' ? 'Déverrouillage' : 'Opposition')} ?`),
               e('button', { className: 'modal-btn primary', onClick: pendingConfirmation ? approveServerAction : executeLocalFaceId, disabled: busy || scanState !== 'idle' }, 'Scanner mon visage'),
               e('button', { className: 'modal-btn secondary', onClick: () => { setPendingConfirmation(''); setLocalFaceIdAction(null); }, disabled: scanState !== 'idle' }, 'Annuler')
             )
@@ -288,7 +281,7 @@ function App() {
         scamAlert && e('div', { className: 'modal-overlay' },
           e('div', { className: 'modal' },
             e('h3', { className: 'modal-title', style: { color: 'var(--danger)' } }, Icon('warning'), 'Arrêtez tout'),
-            e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', marginBottom: '1.5rem' } }, scamAlert),
+            e('p', { style: { color: 'var(--text-muted)', fontSize: '0.95rem', whiteSpace: 'pre-wrap', marginBottom: '1.5rem', lineHeight: '1.5' } }, scamAlert),
             e('button', { className: 'modal-btn danger', onClick: resetState }, 'Raccrocher et signaler')
           )
         ),
@@ -302,20 +295,18 @@ function App() {
     // ===============================================
     e('div', { className: 'admin-panel' },
       
-      // Les Onglets (Tabs)
       e('div', { className: 'admin-tabs' },
         e('button', { className: `admin-tab ${adminTab === 'CRM' ? 'active' : ''}`, onClick: () => setAdminTab('CRM') }, 'Vue Conseiller (CRM)'),
         e('button', { className: `admin-tab ${adminTab === 'CISO' ? 'active' : ''}`, onClick: () => setAdminTab('CISO') }, 'Vue Global (CISO)')
       ),
 
-      // CONTENU ONGLET 1 : CRM (CONSEILLER)
       adminTab === 'CRM' && e('div', { className: 'admin-content' },
         e('div', { className: 'admin-card', style: { borderTop: '4px solid var(--primary)' } },
           e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
             e('div', null, e('h3', { style: { margin: '0 0 0.25rem 0', borderBottom: 'none', padding: 0 } }, 'Alexandre Dupont'), e('p', { style: { margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' } }, 'ID : 09843-AX | Seg: Particulier')),
             e('div', { className: `crm-status-badge ${verified ? 'secure' : 'idle'}` }, Icon(verified ? 'lock' : 'lock_open'), verified ? 'Authentifié' : 'Non authentifié')
           ),
-          e('div', { className: 'row', style: { marginTop: '1.5rem', borderTop: '1px solid #eee', paddingTop: '1rem' } },
+          e('div', { className: 'row', style: { marginTop: '1.5rem', borderTop: '1px solid #f2f2f7', paddingTop: '1.5rem' } },
             !verified && e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('shield'), 'Authentifier client'),
             !verified && e('button', { className: 'control-btn', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Lancer Voicebot IA'),
             verified && e('button', { className: 'control-btn', style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, onClick: resetState }, Icon('call_end'), 'Clôturer')
@@ -327,7 +318,6 @@ function App() {
           e('div', { className: 'row' },
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Geler (Step-Up)'),
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement (Bloqué)'),
-            // LE BOUTON ANYDESK
             e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, style: { marginLeft: 'auto'}, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler Hack AnyDesk')
           )
         ),
@@ -341,7 +331,6 @@ function App() {
         )
       ),
 
-      // CONTENU ONGLET 2 : CISO (DIRECTEUR SÉCURITÉ)
       adminTab === 'CISO' && e('div', { className: 'admin-content' },
         e('div', { className: 'ciso-grid' },
           e('div', { className: 'ciso-stat-card green' }, e('div', { className: 'icon' }, Icon('verified_user')), e('p', { className: 'value' }, '12 450'), e('p', { className: 'label' }, 'Appels sécurisés (Aujourd\'hui)')),
@@ -350,8 +339,8 @@ function App() {
         ),
         e('div', { className: 'admin-card' },
           e('h3', null, Icon('bolt'), 'Prévention des fraudes (Mode Opératoire)'),
-          e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 } }, "Le protocole Castor empêche nativement les attaques suivantes :"),
-          e('ul', { style: { fontSize: '0.9rem', color: '#333', lineHeight: 1.6 } },
+          e('p', { style: { color: 'var(--text-muted)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '1rem' } }, "Le protocole Castor empêche nativement les attaques suivantes :"),
+          e('ul', { style: { fontSize: '0.95rem', color: '#111', lineHeight: 1.8 } },
             e('li', null, e('strong', null, 'Clonage Vocal / Deepfake :'), ' Bloqué. Sans la signature EdDSA du serveur, la voix n\'a aucune autorité.'),
             e('li', null, e('strong', null, 'Ingénierie Sociale au Virement :'), ' Bloqué. Si le client tente un virement pendant l\'appel, Castor coupe la session.'),
             e('li', null, e('strong', null, 'Prise de contrôle à distance (AnyDesk) :'), ' Bloqué. Castor masque l\'interface dès la détection de l\'écran partagé.')
