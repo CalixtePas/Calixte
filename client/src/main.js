@@ -6,6 +6,15 @@ const API = window.ENV?.API_BASE_URL || 'http://localhost:3001/castor/v1';
 const e = React.createElement;
 const Icon = (name) => e('span', { className: 'material-symbols-outlined icon', style: { fontSize: 'inherit' } }, name);
 
+// RETOUR DE LA LISTE COMPLÈTE
+const RECIPIENTS = [
+  'Nouveau bénéficiaire...',
+  'Bailleur (Loyer Mensuel)',
+  'Maître Leblanc (Notaire Immo)',
+  'Jean Dupont (Remboursement)',
+  'Compte Épargne Externe'
+];
+
 const OS_APPS = [
   { name: 'Photos', icon: 'photo_library', color: '#fff', bg: '#007AFF' },
   { name: 'Messages', icon: 'chat_bubble', color: '#fff', bg: '#34C759' },
@@ -16,7 +25,7 @@ const OS_APPS = [
 ];
 
 function App() {
-  const [deviceView, setDeviceView] = useState('OS_HOME'); // 'OS_HOME' ou 'APP'
+  const [deviceView, setDeviceView] = useState('OS_HOME'); 
   const [adminTab, setAdminTab] = useState('CRM');
   const [currentTime, setCurrentTime] = useState('');
   
@@ -27,8 +36,7 @@ function App() {
   const [interactionId, setInteractionId] = useState('');
   const [isCardFrozen, setIsCardFrozen] = useState(false);
   
-  // GESTION DE L'APPEL TELEPHONIQUE NATIF
-  const [incomingCallParams, setIncomingCallParams] = useState(null); // { actorType, dataStart }
+  const [incomingCallParams, setIncomingCallParams] = useState(null); 
   const [isPhoneCallActive, setIsPhoneCallActive] = useState(false);
   
   const [hasPushNotif, setHasPushNotif] = useState(false);
@@ -40,6 +48,13 @@ function App() {
   const [actionLog, setActionLog] = useState([]);
   const [apiLogs, setApiLogs] = useState([]); 
   const esRef = useRef(null);
+
+  // ÉTATS COMPLETS POUR LE VIREMENT
+  const [activePage, setActivePage] = useState('HOME');
+  const [transferAmount, setTransferAmount] = useState(''); 
+  const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
+  const [newBeneficiaryName, setNewBeneficiaryName] = useState('');
+  const [newBeneficiaryIban, setNewBeneficiaryIban] = useState('');
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller');
@@ -62,7 +77,7 @@ function App() {
     setIncomingCallParams(null); setIsPhoneCallActive(false);
   }
 
-  // --- 1. L'ADMIN LANCE L'APPEL (Réseau Téléphonique) ---
+  // --- ACTIONS CRM ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
     logAction(`Appel téléphonique sortant vers le client...`);
@@ -75,13 +90,11 @@ function App() {
       const dataStart = await resStart.json();
       logApiPayload('in', '200 OK (Interaction Created)', dataStart);
       
-      // On affiche juste l'écran d'appel entrant, on NE FAIT PAS encore la vérification crypto.
       setIncomingCallParams({ actorType, dataStart });
       
     } catch (err) { logAction('❌ Échec réseau.', 'err'); } finally { setBusy(false); }
   }
 
-  // --- 2. LE CLIENT DÉCROCHE (Activation du protocole Castor) ---
   async function acceptCall() {
     if (!incomingCallParams) return;
     const { dataStart } = incomingCallParams;
@@ -101,11 +114,10 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // LA MAGIE EST ICI : On respecte l'endroit où est l'utilisateur
       if (deviceView === 'OS_HOME') {
-        setHasPushNotif(true); // Il est sur l'accueil OS, on push.
+        setHasPushNotif(true);
       } else {
-        setShowPermissionsPopup(true); // Il était DÉJÀ dans l'app, on affiche le pop-up par-dessus.
+        setShowPermissionsPopup(true);
       }
       logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
 
@@ -156,7 +168,16 @@ function App() {
     } catch (err) { showToast("Erreur de validation."); }
   }
 
+  // --- ACTIONS CLIENT ---
   function handleUserAction(actionName) {
+    let finalAmount = parseFloat(transferAmount);
+    const isNewBen = transferRecipient === RECIPIENTS[0];
+
+    if (actionName === 'WIRE_TRANSFER') {
+        if (isNaN(finalAmount) || finalAmount <= 0) return showToast("Veuillez saisir un montant valide.");
+        if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
+    }
+
     if (verified === true) {
       if (summary.cannot.includes(actionName)) { setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); return; }
       if (actionName === 'WIRE_TRANSFER') { setScamAlert(`ALERTE FRAUDE\n\nVirement bloqué pendant l'appel.`); return; }
@@ -164,10 +185,28 @@ function App() {
       if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
       showToast(`Action exécutée.`); return;
     }
+
+    // Hors appel
+    if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50 && !isNewBen) {
+        setBalance(prev => prev - finalAmount); 
+        setTransferAmount(''); 
+        setActivePage('HOME');
+        showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`); 
+        return;
+    }
+
     if (!confirm(`SÉCURITÉ PASSIVE\n\nRAPPEL : Les vrais conseillers sont authentifiés en haut de l'écran.\nContinuer de vous-même ?`)) return;
+    
     if (actionName === 'FREEZE_CARD') { setIsCardFrozen(true); showToast("Carte bloquée."); } 
     else if (actionName === 'UNFREEZE_CARD') { setIsCardFrozen(false); showToast("Carte débloquée."); } 
-    else { showToast(`Opération effectuée.`); }
+    else if (actionName === 'WIRE_TRANSFER') {
+        setBalance(prev => prev - finalAmount); 
+        setTransferAmount(''); 
+        setNewBeneficiaryName(''); 
+        setNewBeneficiaryIban('');
+        setActivePage('HOME'); 
+        showToast(`Virement de ${finalAmount.toFixed(2)} € validé.`);
+    } else { showToast(`Opération effectuée.`); }
   }
 
   function openAppFromHome() {
@@ -196,7 +235,6 @@ function App() {
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
         
-        // --- 1. OVERLAY : APPEL ENTRANT NATIF ---
         incomingCallParams && e('div', { className: 'incoming-call-screen' },
           e('div', { className: 'call-info' },
             e('div', { className: 'call-avatar' }, Icon('person')),
@@ -204,18 +242,11 @@ function App() {
             e('p', { className: 'call-type' }, 'Appel entrant...')
           ),
           e('div', { className: 'call-actions' },
-            e('div', { className: 'call-btn-wrapper' },
-              e('button', { className: 'call-btn decline', onClick: declineCall }, Icon('call_end')),
-              e('span', { className: 'call-btn-label' }, 'Refuser')
-            ),
-            e('div', { className: 'call-btn-wrapper' },
-              e('button', { className: 'call-btn accept', onClick: acceptCall }, Icon('call')),
-              e('span', { className: 'call-btn-label' }, 'Décrocher')
-            )
+            e('div', { className: 'call-btn-wrapper' }, e('button', { className: 'call-btn decline', onClick: declineCall }, Icon('call_end')), e('span', { className: 'call-btn-label' }, 'Refuser')),
+            e('div', { className: 'call-btn-wrapper' }, e('button', { className: 'call-btn accept', onClick: acceptCall }, Icon('call')), e('span', { className: 'call-btn-label' }, 'Décrocher'))
           )
         ),
 
-        // --- 2. VUE : ACCUEIL OS ---
         deviceView === 'OS_HOME' && e('div', { className: 'phone-home' },
           isPhoneCallActive && e('div', { className: 'active-call-pill' }, Icon('call'), '00:12'),
           e('div', { className: 'os-clock', style: { marginTop: isPhoneCallActive ? '2rem' : '0'} }, currentTime),
@@ -226,19 +257,14 @@ function App() {
           ),
 
           e('div', { className: 'app-grid' },
-            OS_APPS.map(app => e('div', { key: app.name, className: 'app-icon-wrapper' }, 
-              e('div', { className: 'app-icon', style: { background: app.bg, color: app.color } }, Icon(app.icon)), e('div', { className: 'app-label' }, app.name)
-            )),
-            e('div', { className: 'app-icon-wrapper', onClick: openAppFromHome }, 
-              e('div', { className: 'app-icon castor-app' }, Icon('account_balance')), e('div', { className: 'app-label' }, 'CastorBank')
-            )
+            OS_APPS.map(app => e('div', { key: app.name, className: 'app-icon-wrapper' }, e('div', { className: 'app-icon', style: { background: app.bg, color: app.color } }, Icon(app.icon)), e('div', { className: 'app-label' }, app.name))),
+            e('div', { className: 'app-icon-wrapper', onClick: openAppFromHome }, e('div', { className: 'app-icon castor-app' }, Icon('account_balance')), e('div', { className: 'app-label' }, 'CastorBank'))
           )
         ),
 
-        // --- 3. VUE : APPLICATION CASTORBANK ---
         deviceView === 'APP' && e('div', { className: 'app-container' },
           e('div', { className: 'mobile-header' }, 
-            e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: () => setDeviceView('OS_HOME') }, Icon('arrow_back_ios'), 'Quitter'),
+            e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: () => { setDeviceView('OS_HOME'); setActivePage('HOME'); } }, Icon('arrow_back_ios'), 'Quitter'),
             e('div', { className: 'profile-pic' }, Icon('person'))
           ),
 
@@ -256,7 +282,7 @@ function App() {
             ),
 
             e('div', { className: 'action-grid' },
-              e('button', { className: 'action-btn', onClick: () => handleUserAction('WIRE_TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
+              e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
               e('button', { className: 'action-btn', onClick: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }, e('div', {className: 'icon'}, Icon(isCardFrozen ? 'lock_open' : 'ac_unit')), isCardFrozen ? 'Débloquer' : 'Bloquer'),
               e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
               e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
@@ -266,6 +292,41 @@ function App() {
             e('div', { className: 'tx-list' }, 
               e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
               e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
+            )
+          ),
+
+          // --- LE FORMULAIRE DE VIREMENT COMPLET RÉTABLI ---
+          activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
+            e('div', { className: 'page-header' }, 
+              e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), 
+              e('h3', null, 'Nouveau Virement')
+            ),
+            e('div', { className: 'page-content' },
+              e('div', { className: 'form-group' }, 
+                e('label', null, 'Compte à débiter'), 
+                e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €)`))
+              ),
+              e('div', { className: 'form-group' }, 
+                e('label', null, 'Bénéficiaire'), 
+                e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) }, 
+                  RECIPIENTS.map(r => e('option', { key: r, value: r }, r))
+                )
+              ),
+              transferRecipient === RECIPIENTS[0] && e(React.Fragment, null, 
+                e('div', { className: 'form-group' }, 
+                  e('label', null, 'Nom du bénéficiaire'), 
+                  e('input', { type: 'text', placeholder: 'Ex: Garage Martin', value: newBeneficiaryName, onChange: (evt) => setNewBeneficiaryName(evt.target.value) })
+                ), 
+                e('div', { className: 'form-group' }, 
+                  e('label', null, 'IBAN'), 
+                  e('input', { type: 'text', placeholder: 'FR76...', value: newBeneficiaryIban, onChange: (evt) => setNewBeneficiaryIban(evt.target.value) })
+                )
+              ),
+              e('div', { className: 'form-group' }, 
+                e('label', null, 'Montant du virement (€)'), 
+                e('input', { type: 'number', min: '1', placeholder: '0.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })
+              ),
+              e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Valider le virement')
             )
           ),
 
