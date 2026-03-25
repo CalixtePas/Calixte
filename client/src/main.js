@@ -119,11 +119,10 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      if (deviceView === 'OS_HOME') {
-        setHasPushNotif(true);
-      } else {
-        setShowPermissionsPopup(true);
-      }
+      // CORRECTION : Forcer l'ouverture de l'app CastorBank quand on décroche
+      setDeviceView('APP');
+      setHasPushNotif(false);
+      setShowPermissionsPopup(true);
       logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
 
       if (esRef.current) esRef.current.close();
@@ -294,7 +293,6 @@ function App() {
             e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
           ),
 
-          // --- LE CONTENU FIXE DE L'APP ---
           e('div', { className: 'mobile-content' },
             e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, onClick: () => setActivePage('CARD') },
               (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
@@ -303,7 +301,6 @@ function App() {
               e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092')
             ),
 
-            // GRILLE CORRIGÉE
             e('div', { className: 'action-grid' },
               e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
               e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
@@ -316,9 +313,9 @@ function App() {
               e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
               e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
             )
-          ), // FIN DE MOBILE-CONTENT
+          ),
 
-          // --- LES PAGES EN SUPERPOSITION ---
+          // --- LE FORMULAIRE DE VIREMENT COMPLET ---
           activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
             e('div', { className: 'page-header' }, 
               e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), 
@@ -370,7 +367,6 @@ function App() {
             )
           ),
 
-          // --- MODALES (Toujours par dessus tout) ---
           showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
             e('div', { className: 'modal' },
               e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
@@ -412,6 +408,7 @@ function App() {
       
       e('div', { className: 'admin-tabs' },
         e('button', { className: `admin-tab ${adminTab === 'CRM' ? 'active' : ''}`, onClick: () => setAdminTab('CRM') }, 'Vue Conseiller'),
+        e('button', { className: `admin-tab ${adminTab === 'CISO' ? 'active' : ''}`, onClick: () => setAdminTab('CISO') }, 'Vue Global (CISO)'),
         e('button', { className: `admin-tab ${adminTab === 'DEVELOPER' ? 'active' : ''}`, onClick: () => setAdminTab('DEVELOPER') }, 'Développeur & API')
       ),
 
@@ -444,6 +441,24 @@ function App() {
           e('div', { className: 'logs' },
             actionLog.length === 0 && e('div', null, '> En attente...'),
             actionLog.map((log, i) => e('div', { key: i, className: log.type }, `[${log.t}] ${log.msg}`))
+          )
+        )
+      ),
+
+      // --- ONGLET CISO RESTAURÉ ---
+      adminTab === 'CISO' && e('div', { className: 'admin-content' },
+        e('div', { className: 'ciso-grid' },
+          e('div', { className: 'ciso-stat-card green' }, e('div', { className: 'icon' }, Icon('verified_user')), e('p', { className: 'value' }, '12 450'), e('p', { className: 'label' }, 'Appels sécurisés (Aujourd\'hui)')),
+          e('div', { className: 'ciso-stat-card red' }, e('div', { className: 'icon' }, Icon('gavel')), e('p', { className: 'value' }, '342'), e('p', { className: 'label' }, 'Attaques stoppées par Policy Engine')),
+          e('div', { className: 'ciso-stat-card' }, e('div', { className: 'icon' }, Icon('savings')), e('p', { className: 'value' }, '1,2 M €'), e('p', { className: 'label' }, 'Fonds sauvés (APP Fraud)'))
+        ),
+        e('div', { className: 'admin-card' },
+          e('h3', null, Icon('bolt'), 'Prévention des fraudes (Mode Opératoire)'),
+          e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 } }, "Le protocole Castor empêche nativement les attaques suivantes :"),
+          e('ul', { style: { fontSize: '0.9rem', color: '#333', lineHeight: 1.6 } },
+            e('li', null, e('strong', null, 'Clonage Vocal / Deepfake :'), ' Bloqué. Sans signature EdDSA, la voix n\'a aucune autorité.'),
+            e('li', null, e('strong', null, 'Ingénierie Sociale au Virement :'), ' Bloqué. Action interdite en cours d\'appel.'),
+            e('li', null, e('strong', null, 'Prise de contrôle à distance (AnyDesk) :'), ' Bloqué. Détection native de l\'écran partagé.')
           )
         )
       ),
