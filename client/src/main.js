@@ -16,12 +16,10 @@ const OS_APPS = [
 ];
 
 function App() {
-  // Navigation Globale
   const [deviceView, setDeviceView] = useState('OS_HOME'); // 'OS_HOME' ou 'APP'
-  const [adminTab, setAdminTab] = useState('CRM'); // 'CRM' ou 'DEVELOPER'
+  const [adminTab, setAdminTab] = useState('CRM');
   const [currentTime, setCurrentTime] = useState('');
   
-  // États Application Bancaire
   const [balance, setBalance] = useState(12450.00);
   const [token, setToken] = useState('');
   const [verified, setVerified] = useState(null); 
@@ -29,20 +27,22 @@ function App() {
   const [interactionId, setInteractionId] = useState('');
   const [isCardFrozen, setIsCardFrozen] = useState(false);
   
-  // Modales & Notifications
+  // GESTION DE L'APPEL TELEPHONIQUE NATIF
+  const [incomingCallParams, setIncomingCallParams] = useState(null); // { actorType, dataStart }
+  const [isPhoneCallActive, setIsPhoneCallActive] = useState(false);
+  
   const [hasPushNotif, setHasPushNotif] = useState(false);
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
   const [scamAlert, setScamAlert] = useState('');
   const [toasts, setToasts] = useState([]);
   const [busy, setBusy] = useState(false);
   
-  // LOGS (CRM et API)
   const [actionLog, setActionLog] = useState([]);
-  const [apiLogs, setApiLogs] = useState([]); // Pour l'onglet Developer
+  const [apiLogs, setApiLogs] = useState([]); 
   const esRef = useRef(null);
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
-  const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : 'Conseiller';
+  const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller');
 
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
@@ -53,22 +53,19 @@ function App() {
 
   const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
   const showToast = (msg) => { const id = Date.now(); setToasts(prev => [...prev, { id, msg }]); setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000); };
-  
-  // Fonction pour logger les payloads bruts (Vue Developer)
-  const logApiPayload = (direction, route, data) => {
-    setApiLogs(prev => [{ t: new Date().toISOString(), direction, route, data }, ...prev]);
-  };
+  const logApiPayload = (direction, route, data) => setApiLogs(prev => [{ t: new Date().toISOString(), direction, route, data }, ...prev]);
 
   function resetState() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
+    setIncomingCallParams(null); setIsPhoneCallActive(false);
   }
 
-  // --- ACTIONS SERVEUR (Le Conseiller) ---
+  // --- 1. L'ADMIN LANCE L'APPEL (Réseau Téléphonique) ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
-    logAction(`Initialisation de la session Castor (${actorType})...`);
+    logAction(`Appel téléphonique sortant vers le client...`);
     
     try {
       const startReq = { actor_type: actorType, intent: 'FRAUD_CALLBACK', audience_ref: 'app-mobile-user' };
@@ -78,6 +75,22 @@ function App() {
       const dataStart = await resStart.json();
       logApiPayload('in', '200 OK (Interaction Created)', dataStart);
       
+      // On affiche juste l'écran d'appel entrant, on NE FAIT PAS encore la vérification crypto.
+      setIncomingCallParams({ actorType, dataStart });
+      
+    } catch (err) { logAction('❌ Échec réseau.', 'err'); } finally { setBusy(false); }
+  }
+
+  // --- 2. LE CLIENT DÉCROCHE (Activation du protocole Castor) ---
+  async function acceptCall() {
+    if (!incomingCallParams) return;
+    const { dataStart } = incomingCallParams;
+    
+    setIncomingCallParams(null);
+    setIsPhoneCallActive(true);
+    logAction(`📞 Le client a décroché. Vérification Castor en arrière-plan...`, 'info');
+
+    try {
       setToken(dataStart.token);
       const jwksRes = await fetch(`${API}/jwks`);
       const jwks = await jwksRes.json();
@@ -88,34 +101,39 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // LOGIQUE : Si l'utilisateur est sur l'accueil OS, on push. Sinon (dans l'app), on affiche direct la bannière
+      // LA MAGIE EST ICI : On respecte l'endroit où est l'utilisateur
       if (deviceView === 'OS_HOME') {
-        setHasPushNotif(true);
+        setHasPushNotif(true); // Il est sur l'accueil OS, on push.
       } else {
-        setShowPermissionsPopup(true);
+        setShowPermissionsPopup(true); // Il était DÉJÀ dans l'app, on affiche le pop-up par-dessus.
       }
-      logAction(`✅ Handshake JWT validé. Session sécurisée ouverte.`, 'success');
+      logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
 
       if (esRef.current) esRef.current.close();
       const es = new EventSource(`${API}/interactions/${id}/stream`);
       es.onmessage = (evt) => {
         const data = JSON.parse(evt.data);
         logApiPayload('in', 'SSE Event (Server Push)', data);
-        
         if (data.type === 'STEP_UP') {
-          logAction(`🔔 Demande FaceID requise pour ${data.action}.`, 'warn');
-          if(confirm(`Le serveur demande de valider l'action : ${data.action}. Confirmer avec FaceID ?`)) {
+          logAction(`🔔 Demande d'action distante : ${data.action}.`, 'warn');
+          if(confirm(`Le serveur demande de valider l'action : ${data.action}. Confirmer ?`)) {
               approveServerAction(data.confirmation_id, data.action);
           }
         } else if (data.type === 'ALLOW') {
-          logAction(`ℹ️ Action autorisée (${data.action}).`); showToast(`Action validée : ${data.action}`);
+          logAction(`ℹ️ Action autorisée (${data.action}).`); showToast(`Action validée.`);
         } else if (data.type === 'DENY') {
           logAction(`❌ Rejet du serveur (${data.action}).`, 'err');
-          setScamAlert(`ALERTE SÉCURITÉ\n\nL'appelant tente une opération bloquée par la sécurité serveur (${data.action}).\n\nRaccrochez.`);
+          setScamAlert(`ALERTE SÉCURITÉ\n\nL'appelant tente une opération bloquée par la sécurité serveur.\n\nRaccrochez.`);
         }
       };
       esRef.current = es;
-    } catch (err) { setVerified(null); logAction('❌ Échec cryptographique.', 'err'); } finally { setBusy(false); }
+    } catch (err) { setVerified(null); logAction('❌ Échec cryptographique.', 'err'); }
+  }
+
+  function declineCall() {
+    setIncomingCallParams(null);
+    resetState();
+    logAction(`📵 Le client a refusé l'appel.`, 'warn');
   }
 
   async function simulateCallerAction(action) {
@@ -133,22 +151,19 @@ function App() {
     logApiPayload('out', `POST /confirmations/${confId}/approve`, {});
     try {
       await fetch(`${API}/confirmations/${confId}/approve`, { method: 'POST' });
-      logAction('✅ Validation FaceID réussie.', 'success'); showToast("Action confirmée via FaceID.");
+      logAction('✅ Validation client réussie.', 'success'); showToast("Action confirmée.");
       if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
     } catch (err) { showToast("Erreur de validation."); }
   }
 
-  // --- ACTIONS CLIENT (L'Utilisateur) ---
   function handleUserAction(actionName) {
     if (verified === true) {
       if (summary.cannot.includes(actionName)) { setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); return; }
       if (actionName === 'WIRE_TRANSFER') { setScamAlert(`ALERTE FRAUDE\n\nVirement bloqué pendant l'appel.`); return; }
       if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
       if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
-      showToast(`Action exécutée : ${actionName}`); return;
+      showToast(`Action exécutée.`); return;
     }
-    
-    // Hors appel
     if (!confirm(`SÉCURITÉ PASSIVE\n\nRAPPEL : Les vrais conseillers sont authentifiés en haut de l'écran.\nContinuer de vous-même ?`)) return;
     if (actionName === 'FREEZE_CARD') { setIsCardFrozen(true); showToast("Carte bloquée."); } 
     else if (actionName === 'UNFREEZE_CARD') { setIsCardFrozen(false); showToast("Carte débloquée."); } 
@@ -158,30 +173,18 @@ function App() {
   function openAppFromHome() {
     setDeviceView('APP');
     setHasPushNotif(false);
-    if (verified) setShowPermissionsPopup(true); // Si on ouvre l'app avec un appel en cours, on montre le contrat
+    if (verified) setShowPermissionsPopup(true);
   }
 
-  // --- EXPORT COMPLIANCE ---
   function exportAuditReport() {
     const report = {
-      compliance_id: `AUDIT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      timestamp: new Date().toISOString(),
-      session: {
-        interaction_id: interactionId || 'NO_SESSION',
-        is_verified: verified || false,
-        actor: actorName,
-        customer_id: '09843-AX'
-      },
-      audit_trail: actionLog,
-      cryptographic_payloads: apiLogs
+      compliance_id: `AUDIT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`, timestamp: new Date().toISOString(),
+      session: { interaction_id: interactionId || 'NO_SESSION', is_verified: verified || false, actor: actorName },
+      audit_trail: actionLog, cryptographic_payloads: apiLogs
     };
-    
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `castor_compliance_${report.compliance_id}.json`;
-    a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `castor_compliance_${report.compliance_id}.json`; a.click();
     logAction("📄 Rapport d'Audit de Conformité généré.", "success");
   }
 
@@ -193,29 +196,46 @@ function App() {
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
         
-        // VUE : ACCUEIL OS (Le faux téléphone)
-        deviceView === 'OS_HOME' && e('div', { className: 'phone-home' },
-          e('div', { className: 'os-clock' }, currentTime),
-          
-          hasPushNotif && e('div', { className: 'os-push', onClick: openAppFromHome },
-            e('div', { className: 'icon-box' }, Icon('shield_person')),
-            e('div', { className: 'os-push-content' }, e('h4', null, 'CastorBank'), e('p', null, `Appel sécurisé : ${actorName}`))
+        // --- 1. OVERLAY : APPEL ENTRANT NATIF ---
+        incomingCallParams && e('div', { className: 'incoming-call-screen' },
+          e('div', { className: 'call-info' },
+            e('div', { className: 'call-avatar' }, Icon('person')),
+            e('h3', { className: 'call-name' }, actorName === 'Agent IA' ? '01 42 14 55 22' : 'Alexandre Dupont'),
+            e('p', { className: 'call-type' }, 'Appel entrant...')
           ),
-
-          e('div', { className: 'app-grid' },
-            OS_APPS.map(app => e('div', { key: app.name, className: 'app-icon-wrapper' }, 
-              e('div', { className: 'app-icon', style: { background: app.bg, color: app.color } }, Icon(app.icon)),
-              e('div', { className: 'app-label' }, app.name)
-            )),
-            // LA FAUSSE APP CASTOR
-            e('div', { className: 'app-icon-wrapper', onClick: openAppFromHome }, 
-              e('div', { className: 'app-icon castor-app' }, Icon('account_balance')),
-              e('div', { className: 'app-label' }, 'CastorBank')
+          e('div', { className: 'call-actions' },
+            e('div', { className: 'call-btn-wrapper' },
+              e('button', { className: 'call-btn decline', onClick: declineCall }, Icon('call_end')),
+              e('span', { className: 'call-btn-label' }, 'Refuser')
+            ),
+            e('div', { className: 'call-btn-wrapper' },
+              e('button', { className: 'call-btn accept', onClick: acceptCall }, Icon('call')),
+              e('span', { className: 'call-btn-label' }, 'Décrocher')
             )
           )
         ),
 
-        // VUE : APPLICATION CASTORBANK
+        // --- 2. VUE : ACCUEIL OS ---
+        deviceView === 'OS_HOME' && e('div', { className: 'phone-home' },
+          isPhoneCallActive && e('div', { className: 'active-call-pill' }, Icon('call'), '00:12'),
+          e('div', { className: 'os-clock', style: { marginTop: isPhoneCallActive ? '2rem' : '0'} }, currentTime),
+          
+          hasPushNotif && e('div', { className: 'os-push', onClick: openAppFromHome },
+            e('div', { className: 'icon-box' }, Icon('shield_person')),
+            e('div', { className: 'os-push-content' }, e('h4', null, 'CastorBank'), e('p', null, `Appel téléphonique sécurisé. Touchez pour ouvrir.`))
+          ),
+
+          e('div', { className: 'app-grid' },
+            OS_APPS.map(app => e('div', { key: app.name, className: 'app-icon-wrapper' }, 
+              e('div', { className: 'app-icon', style: { background: app.bg, color: app.color } }, Icon(app.icon)), e('div', { className: 'app-label' }, app.name)
+            )),
+            e('div', { className: 'app-icon-wrapper', onClick: openAppFromHome }, 
+              e('div', { className: 'app-icon castor-app' }, Icon('account_balance')), e('div', { className: 'app-label' }, 'CastorBank')
+            )
+          )
+        ),
+
+        // --- 3. VUE : APPLICATION CASTORBANK ---
         deviceView === 'APP' && e('div', { className: 'app-container' },
           e('div', { className: 'mobile-header' }, 
             e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: () => setDeviceView('OS_HOME') }, Icon('arrow_back_ios'), 'Quitter'),
@@ -281,7 +301,6 @@ function App() {
         e('button', { className: `admin-tab ${adminTab === 'DEVELOPER' ? 'active' : ''}`, onClick: () => setAdminTab('DEVELOPER') }, 'Développeur & API')
       ),
 
-      // ONGLET 1 : CRM CONSEILLER
       adminTab === 'CRM' && e('div', { className: 'admin-content' },
         e('div', { className: 'admin-card', style: { borderTop: '4px solid var(--primary)' } },
           e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
@@ -289,9 +308,9 @@ function App() {
             e('div', { className: `crm-status-badge ${verified ? 'secure' : 'idle'}` }, Icon(verified ? 'lock' : 'lock_open'), verified ? 'Authentifié' : 'Non authentifié')
           ),
           e('div', { className: 'row', style: { marginTop: '1.5rem', borderTop: '1px solid #eee', paddingTop: '1rem' } },
-            !verified && e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('shield'), 'Authentifier client'),
-            !verified && e('button', { className: 'control-btn', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Lancer Voicebot IA'),
-            verified && e('button', { className: 'control-btn', style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, onClick: resetState }, Icon('call_end'), 'Clôturer la session')
+            !isPhoneCallActive && !incomingCallParams && e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('call'), 'Appeler (Humain)'),
+            !isPhoneCallActive && !incomingCallParams && e('button', { className: 'control-btn', onClick: () => simulateIncomingCall('AI_AGENT'), disabled: busy }, Icon('smart_toy'), 'Appeler (Voicebot)'),
+            (isPhoneCallActive || incomingCallParams) && e('button', { className: 'control-btn', style: { color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: 'auto' }, onClick: resetState }, Icon('call_end'), 'Raccrocher')
           )
         ),
 
@@ -306,7 +325,6 @@ function App() {
         e('div', { className: 'admin-card', style: { flex: 1, display: 'flex', flexDirection: 'column' } },
           e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center'} },
             e('h3', {style: {border: 'none', padding: 0, margin: 0}}, Icon('history'), 'Piste d\'audit'),
-            // LE BOUTON EXPORT COMPLIANCE
             e('button', { className: 'control-btn success', onClick: exportAuditReport }, Icon('download'), 'Export Conformité JSON')
           ),
           e('div', { className: 'logs' },
@@ -316,7 +334,6 @@ function App() {
         )
       ),
 
-      // ONGLET 2 : DEVELOPER / API (L'Effet Stripe)
       adminTab === 'DEVELOPER' && e('div', { className: 'admin-content' },
         e('h3', { style: { margin: 0, fontSize: '1.1rem' } }, 'Flux API & Preuves Cryptographiques'),
         e('p', { style: { fontSize: '0.85rem', color: '#666', marginTop: 0 } }, 'Visualisez les payloads réels traités par le moteur Castor en temps réel.'),
