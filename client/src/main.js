@@ -6,7 +6,6 @@ const API = window.ENV?.API_BASE_URL || 'http://localhost:3001/castor/v1';
 const e = React.createElement;
 const Icon = (name) => e('span', { className: 'material-symbols-outlined icon', style: { fontSize: 'inherit' } }, name);
 
-// RETOUR DE LA LISTE COMPLÈTE
 const RECIPIENTS = [
   'Nouveau bénéficiaire...',
   'Bailleur (Loyer Mensuel)',
@@ -35,6 +34,8 @@ function App() {
   const [payload, setPayload] = useState(null);
   const [interactionId, setInteractionId] = useState('');
   const [isCardFrozen, setIsCardFrozen] = useState(false);
+  const [isCardCanceled, setIsCardCanceled] = useState(false);
+  const [onlinePayments, setOnlinePayments] = useState(true);
   
   const [incomingCallParams, setIncomingCallParams] = useState(null); 
   const [isPhoneCallActive, setIsPhoneCallActive] = useState(false);
@@ -49,12 +50,16 @@ function App() {
   const [apiLogs, setApiLogs] = useState([]); 
   const esRef = useRef(null);
 
-  // ÉTATS COMPLETS POUR LE VIREMENT
   const [activePage, setActivePage] = useState('HOME');
   const [transferAmount, setTransferAmount] = useState(''); 
   const [transferRecipient, setTransferRecipient] = useState(RECIPIENTS[1]);
   const [newBeneficiaryName, setNewBeneficiaryName] = useState('');
   const [newBeneficiaryIban, setNewBeneficiaryIban] = useState('');
+  
+  const [pendingConfirmation, setPendingConfirmation] = useState('');
+  const [pendingActionName, setPendingActionName] = useState('');
+  const [localFaceIdAction, setLocalFaceIdAction] = useState(null); 
+  const [scanState, setScanState] = useState('idle');
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller');
@@ -75,6 +80,7 @@ function App() {
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
     setIncomingCallParams(null); setIsPhoneCallActive(false);
+    setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setScanState('idle');
   }
 
   // --- ACTIONS CRM ---
@@ -91,7 +97,6 @@ function App() {
       logApiPayload('in', '200 OK (Interaction Created)', dataStart);
       
       setIncomingCallParams({ actorType, dataStart });
-      
     } catch (err) { logAction('❌ Échec réseau.', 'err'); } finally { setBusy(false); }
   }
 
@@ -101,7 +106,7 @@ function App() {
     
     setIncomingCallParams(null);
     setIsPhoneCallActive(true);
-    logAction(`📞 Le client a décroché. Vérification Castor en arrière-plan...`, 'info');
+    logAction(`📞 Le client a décroché. Vérification Castor...`, 'info');
 
     try {
       setToken(dataStart.token);
@@ -128,9 +133,7 @@ function App() {
         logApiPayload('in', 'SSE Event (Server Push)', data);
         if (data.type === 'STEP_UP') {
           logAction(`🔔 Demande d'action distante : ${data.action}.`, 'warn');
-          if(confirm(`Le serveur demande de valider l'action : ${data.action}. Confirmer ?`)) {
-              approveServerAction(data.confirmation_id, data.action);
-          }
+          setPendingActionName(data.action); setPendingConfirmation(data.confirmation_id);
         } else if (data.type === 'ALLOW') {
           logAction(`ℹ️ Action autorisée (${data.action}).`); showToast(`Action validée.`);
         } else if (data.type === 'DENY') {
@@ -159,13 +162,32 @@ function App() {
     } catch (err) {}
   }
 
-  async function approveServerAction(confId, actionName) {
-    logApiPayload('out', `POST /confirmations/${confId}/approve`, {});
-    try {
-      await fetch(`${API}/confirmations/${confId}/approve`, { method: 'POST' });
-      logAction('✅ Validation client réussie.', 'success'); showToast("Action confirmée.");
-      if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
-    } catch (err) { showToast("Erreur de validation."); }
+  function executeFaceIdScan(onSuccess) {
+    setScanState('scanning'); setBusy(true);
+    setTimeout(() => {
+      setScanState('success');
+      setTimeout(() => { onSuccess(); setScanState('idle'); setBusy(false); }, 600); 
+    }, 1200);
+  }
+
+  async function approveServerAction() {
+    executeFaceIdScan(async () => {
+      logApiPayload('out', `POST /confirmations/${pendingConfirmation}/approve`, {});
+      try {
+        await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
+        setPendingConfirmation(''); logAction('✅ Validation client réussie.', 'success'); showToast("Action confirmée.");
+        if (pendingActionName === 'FREEZE_CARD') setIsCardFrozen(true);
+      } catch (err) { showToast("Erreur de validation."); }
+    });
+  }
+
+  function executeLocalFaceId() {
+    executeFaceIdScan(() => {
+      if (localFaceIdAction === 'REPORT_LOST') {
+        setIsCardCanceled(true); setIsCardFrozen(true); showToast("Carte en opposition définitive."); setActivePage('HOME');
+      }
+      setLocalFaceIdAction(null);
+    });
   }
 
   // --- ACTIONS CLIENT ---
@@ -179,14 +201,13 @@ function App() {
     }
 
     if (verified === true) {
-      if (summary.cannot.includes(actionName)) { setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); return; }
-      if (actionName === 'WIRE_TRANSFER') { setScamAlert(`ALERTE FRAUDE\n\nVirement bloqué pendant l'appel.`); return; }
+      if (summary.cannot.includes(actionName)) { setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); setActivePage('HOME'); return; }
+      if (actionName === 'WIRE_TRANSFER') { setScamAlert(`ALERTE FRAUDE\n\nVirement bloqué pendant l'appel.`); setActivePage('HOME'); return; }
       if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
       if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
       showToast(`Action exécutée.`); return;
     }
 
-    // Hors appel
     if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50 && !isNewBen) {
         setBalance(prev => prev - finalAmount); 
         setTransferAmount(''); 
@@ -273,17 +294,19 @@ function App() {
             e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
           ),
 
+          // --- LE CONTENU FIXE DE L'APP ---
           e('div', { className: 'mobile-content' },
-            e('div', { className: `bank-card ${isCardFrozen ? 'frozen' : ''}` },
-              isCardFrozen && e('div', { className: 'frozen-badge' }, Icon('ac_unit'), 'BLOQUÉE'),
+            e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, onClick: () => setActivePage('CARD') },
+              (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
               e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
               e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
               e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092')
             ),
 
+            // GRILLE CORRIGÉE
             e('div', { className: 'action-grid' },
               e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
-              e('button', { className: 'action-btn', onClick: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }, e('div', {className: 'icon'}, Icon(isCardFrozen ? 'lock_open' : 'ac_unit')), isCardFrozen ? 'Débloquer' : 'Bloquer'),
+              e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
               e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
               e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
             ),
@@ -293,9 +316,9 @@ function App() {
               e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
               e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
             )
-          ),
+          ), // FIN DE MOBILE-CONTENT
 
-          // --- LE FORMULAIRE DE VIREMENT COMPLET RÉTABLI ---
+          // --- LES PAGES EN SUPERPOSITION ---
           activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
             e('div', { className: 'page-header' }, 
               e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), 
@@ -330,12 +353,42 @@ function App() {
             )
           ),
 
+          activePage === 'CARD' && e('div', { className: 'mobile-page' },
+            e('div', { className: 'page-header' }, e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), e('h3', null, 'Ma carte')),
+            e('div', { className: 'page-content' },
+              e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, style: { margin: '0 0 2rem 0', cursor: 'default' } },
+                (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
+                e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Visa Premier'),
+                e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX' : '**** **** 4092')
+              ),
+              e('div', { className: 'menu-list' },
+                e('div', { className: 'menu-item' }, e('div', { className: 'menu-item-info' }, e('div', { className: 'icon', style: { background: isCardCanceled ? '#eee' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), e('div', null, e('h4', null, isCardCanceled ? 'Opposition' : (isCardFrozen ? 'Débloquer' : 'Bloquer temporairement')))),
+                  isCardCanceled ? null : e('label', { className: 'switch' }, e('input', { type: 'checkbox', checked: isCardFrozen, onChange: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }), e('span', { className: 'slider' }))
+                )
+              ),
+              !isCardCanceled && e('button', { className: 'btn-danger', onClick: () => setLocalFaceIdAction('REPORT_LOST') }, Icon('warning'), 'Signaler volée ou perdue')
+            )
+          ),
+
+          // --- MODALES (Toujours par dessus tout) ---
           showPermissionsPopup && verified === true && e('div', { className: 'modal-overlay' },
             e('div', { className: 'modal' },
               e('h3', { className: 'modal-title' }, Icon('verified_user'), 'Sécurité de l\'appel'),
               e('p', {style: {color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem'}}, `L'application restreint techniquement les actions de l'appelant :`),
               e('ul', { className: 'permissions-list' }, summary.can.map((x,i) => e('li', { key: `can-${i}`, className: 'can-text' }, Icon('check'), e('span', null, x))), summary.cannot.map((x,i) => e('li', { key: `cannot-${i}`, className: 'cannot-text' }, Icon('close'), e('span', null, x)))),
               e('button', { className: 'modal-btn primary', onClick: () => setShowPermissionsPopup(false) }, 'Continuer')
+            )
+          ),
+
+          (pendingConfirmation || localFaceIdAction) && e('div', { className: 'modal-overlay' },
+            e('div', { className: 'modal' },
+              e('div', { style: { textAlign: 'center' } },
+                e('div', { className: `face-id-wrapper ${scanState}` }, e('div', { className: 'face-id-icon' }, Icon(scanState === 'success' ? 'check_circle' : 'face')), e('div', { className: 'face-id-scanner' })),
+                e('h3', { className: 'modal-title', style: { justifyContent: 'center' } }, scanState === 'success' ? 'Vérifié' : 'Face ID'),
+                e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '2rem' } }, `Autoriser l'action ?`),
+                e('button', { className: 'modal-btn primary', onClick: pendingConfirmation ? approveServerAction : executeLocalFaceId, disabled: busy || scanState !== 'idle' }, 'Scanner mon visage'),
+                e('button', { className: 'modal-btn secondary', onClick: () => { setPendingConfirmation(''); setLocalFaceIdAction(null); }, disabled: scanState !== 'idle' }, 'Annuler')
+              )
             )
           ),
 
