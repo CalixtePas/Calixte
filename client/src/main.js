@@ -119,10 +119,11 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // CORRECTION : Forcer l'ouverture de l'app CastorBank quand on décroche
-      setDeviceView('APP');
-      setHasPushNotif(false);
-      setShowPermissionsPopup(true);
+      if (deviceView === 'OS_HOME') {
+        setHasPushNotif(true);
+      } else {
+        setShowPermissionsPopup(true);
+      }
       logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
 
       if (esRef.current) esRef.current.close();
@@ -200,8 +201,28 @@ function App() {
     }
 
     if (verified === true) {
-      if (summary.cannot.includes(actionName)) { setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); setActivePage('HOME'); return; }
-      if (actionName === 'WIRE_TRANSFER') { setScamAlert(`ALERTE FRAUDE\n\nVirement bloqué pendant l'appel.`); setActivePage('HOME'); return; }
+      if (summary.cannot.includes(actionName) && actionName !== 'WIRE_TRANSFER') { 
+          setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); 
+          setActivePage('HOME'); 
+          return; 
+      }
+      
+      if (actionName === 'WIRE_TRANSFER') { 
+          const warningMsg = `⚠️ AVERTISSEMENT DE SÉCURITÉ CRITIQUE ⚠️\n\nVous êtes actuellement au téléphone.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement ou de vous demander un paiement.\n\nSi la personne au bout du fil vous demande de le faire, c'est une fraude. Raccrochez et signalez l'appel.\n\nVoulez-vous quand même forcer ce virement sous votre propre responsabilité ?`;
+          if (!confirm(warningMsg)) {
+              setActivePage('HOME'); 
+              return;
+          }
+          // Le client force l'action
+          setBalance(prev => prev - finalAmount); 
+          setTransferAmount(''); 
+          setNewBeneficiaryName(''); 
+          setNewBeneficiaryIban('');
+          setActivePage('HOME'); 
+          showToast(`Virement de ${finalAmount.toFixed(2)} € validé sous votre responsabilité.`);
+          return;
+      }
+      
       if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
       if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
       showToast(`Action exécutée.`); return;
@@ -258,7 +279,7 @@ function App() {
         incomingCallParams && e('div', { className: 'incoming-call-screen' },
           e('div', { className: 'call-info' },
             e('div', { className: 'call-avatar' }, Icon('person')),
-            e('h3', { className: 'call-name' }, actorName === 'Agent IA' ? '01 42 14 55 22' : 'Alexandre Dupont'),
+            e('h3', { className: 'call-name' }, actorName === 'Agent IA' ? '01 42 14 55 22' : 'Service Client'),
             e('p', { className: 'call-type' }, 'Appel entrant...')
           ),
           e('div', { className: 'call-actions' },
@@ -445,7 +466,6 @@ function App() {
         )
       ),
 
-      // --- ONGLET CISO RESTAURÉ ---
       adminTab === 'CISO' && e('div', { className: 'admin-content' },
         e('div', { className: 'ciso-grid' },
           e('div', { className: 'ciso-stat-card green' }, e('div', { className: 'icon' }, Icon('verified_user')), e('p', { className: 'value' }, '12 450'), e('p', { className: 'label' }, 'Appels sécurisés (Aujourd\'hui)')),
