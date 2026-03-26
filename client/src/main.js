@@ -40,6 +40,7 @@ function App() {
   const [incomingCallParams, setIncomingCallParams] = useState(null); 
   const [isPhoneCallActive, setIsPhoneCallActive] = useState(false);
   const [isScreenShared, setIsScreenShared] = useState(false);
+  const [isRecording, setIsRecording] = useState(false); // NOUVEAU : État d'enregistrement d'écran
   
   const [hasPushNotif, setHasPushNotif] = useState(false);
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
@@ -93,7 +94,7 @@ function App() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
-    setIncomingCallParams(null); setIsPhoneCallActive(false); setIsScreenShared(false);
+    setIncomingCallParams(null); setIsPhoneCallActive(false); setIsScreenShared(false); setIsRecording(false);
     setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setPendingActionData(null); setScanState('idle'); setCustomPrompt(null);
   }
 
@@ -189,6 +190,12 @@ function App() {
     else logAction(`Arrêt du partage d'écran.`, 'info');
   }
 
+  function simulateRecording() {
+    setIsRecording(!isRecording);
+    if (!isRecording) logAction(`⚠️ Enregistrement vidéo de l'écran simulé.`, 'warn');
+    else logAction(`Arrêt de l'enregistrement vidéo.`, 'info');
+  }
+
   function executeFaceIdScan(onSuccess) {
     setScanState('scanning'); setBusy(true);
     setTimeout(() => {
@@ -238,6 +245,7 @@ function App() {
     let finalAmount = parseFloat(transferAmount);
     const isNewBen = transferRecipient === RECIPIENTS[0];
 
+    // Vérification des données du virement
     if (actionName === 'WIRE_TRANSFER') {
         if (isNaN(finalAmount) || finalAmount <= 0) return showToast("Veuillez saisir un montant valide.");
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
@@ -263,12 +271,13 @@ function App() {
               onConfirm: () => {
                   setCustomPrompt(null);
                   setPendingActionData({ amount: finalAmount });
-                  setLocalFaceIdAction(actionName); 
+                  setLocalFaceIdAction(actionName); // Déclenche Face ID
               }
           });
           return;
       }
       
+      // Actions de la carte pendant l'appel déclenchent Face ID aussi
       setLocalFaceIdAction(actionName);
       return;
     }
@@ -288,7 +297,7 @@ function App() {
         onConfirm: () => {
             setCustomPrompt(null);
             if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
-            setLocalFaceIdAction(actionName);
+            setLocalFaceIdAction(actionName); // Redirige systématiquement vers Face ID
         }
     });
   }
@@ -357,10 +366,11 @@ function App() {
 
         deviceView === 'APP' && e('div', { className: 'app-container' },
           
-          isScreenShared && e('div', { className: 'privacy-screen' },
-            e('div', { className: 'icon' }, Icon('visibility_off')),
-            e('h3', null, 'Écran partagé détecté'),
-            e('p', null, 'Pour votre sécurité, CastorBank a masqué vos données. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
+          // ECRAN ANYDESK OU ENREGISTREMENT INTÉGRÉ UNIQUEMENT À L'APP BANCAIRE
+          (isScreenShared || isRecording) && e('div', { className: 'privacy-screen' },
+            e('div', { className: 'icon' }, Icon(isRecording ? 'videocam' : 'visibility_off')),
+            e('h3', null, isRecording ? 'Enregistrement d\'écran détecté' : 'Écran partagé détecté'),
+            e('p', null, isRecording ? 'Pour votre sécurité, CastorBank a bloqué l\'enregistrement vidéo de vos données sensibles.' : 'Pour votre sécurité, CastorBank a masqué vos données. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
           ),
 
           e('div', { className: 'mobile-header' }, 
@@ -533,7 +543,10 @@ function App() {
           e('div', { className: 'row' },
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement (Bloqué)'),
-            e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, style: { marginLeft: 'auto'}, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler AnyDesk')
+            e('div', { style: { display: 'flex', gap: '0.75rem', marginLeft: 'auto' } },
+              e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler AnyDesk'),
+              e('button', { className: `control-btn ${isRecording ? 'primary' : 'warning'}`, onClick: simulateRecording }, Icon(isRecording ? 'videocam_off' : 'videocam'), isRecording ? 'Arrêter Enreg.' : 'Simuler Enregistrement')
+            )
           )
         ),
 
