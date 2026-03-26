@@ -39,6 +39,7 @@ function App() {
   
   const [incomingCallParams, setIncomingCallParams] = useState(null); 
   const [isPhoneCallActive, setIsPhoneCallActive] = useState(false);
+  const [isScreenShared, setIsScreenShared] = useState(false);
   
   const [hasPushNotif, setHasPushNotif] = useState(false);
   const [showPermissionsPopup, setShowPermissionsPopup] = useState(false);
@@ -61,6 +62,9 @@ function App() {
   const [localFaceIdAction, setLocalFaceIdAction] = useState(null); 
   const [scanState, setScanState] = useState('idle');
 
+  // NOUVEAU : État pour remplacer confirm()
+  const [customPrompt, setCustomPrompt] = useState(null); 
+
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller');
 
@@ -79,8 +83,8 @@ function App() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
-    setIncomingCallParams(null); setIsPhoneCallActive(false);
-    setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setScanState('idle');
+    setIncomingCallParams(null); setIsPhoneCallActive(false); setIsScreenShared(false);
+    setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setScanState('idle'); setCustomPrompt(null);
   }
 
   // --- ACTIONS CRM ---
@@ -119,11 +123,9 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      if (deviceView === 'OS_HOME') {
-        setHasPushNotif(true);
-      } else {
-        setShowPermissionsPopup(true);
-      }
+      setDeviceView('APP');
+      setHasPushNotif(false);
+      setShowPermissionsPopup(true);
       logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
 
       if (esRef.current) esRef.current.close();
@@ -133,7 +135,12 @@ function App() {
         logApiPayload('in', 'SSE Event (Server Push)', data);
         if (data.type === 'STEP_UP') {
           logAction(`🔔 Demande d'action distante : ${data.action}.`, 'warn');
-          setPendingActionName(data.action); setPendingConfirmation(data.confirmation_id);
+          setCustomPrompt({
+            title: 'Validation Serveur',
+            message: `Le serveur demande de valider l'action distante : ${data.action}.`,
+            isDanger: false,
+            onConfirm: () => { approveServerAction(data.confirmation_id, data.action); setCustomPrompt(null); }
+          });
         } else if (data.type === 'ALLOW') {
           logAction(`ℹ️ Action autorisée (${data.action}).`); showToast(`Action validée.`);
         } else if (data.type === 'DENY') {
@@ -162,6 +169,12 @@ function App() {
     } catch (err) {}
   }
 
+  function simulateScreenShare() {
+    setIsScreenShared(!isScreenShared);
+    if (!isScreenShared) logAction(`⚠️ Prise de contrôle à distance simulée (AnyDesk).`, 'warn');
+    else logAction(`Arrêt du partage d'écran.`, 'info');
+  }
+
   function executeFaceIdScan(onSuccess) {
     setScanState('scanning'); setBusy(true);
     setTimeout(() => {
@@ -170,13 +183,13 @@ function App() {
     }, 1200);
   }
 
-  async function approveServerAction() {
+  async function approveServerAction(confId, actionName) {
     executeFaceIdScan(async () => {
-      logApiPayload('out', `POST /confirmations/${pendingConfirmation}/approve`, {});
+      logApiPayload('out', `POST /confirmations/${confId}/approve`, {});
       try {
-        await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
-        setPendingConfirmation(''); logAction('✅ Validation client réussie.', 'success'); showToast("Action confirmée.");
-        if (pendingActionName === 'FREEZE_CARD') setIsCardFrozen(true);
+        await fetch(`${API}/confirmations/${confId}/approve`, { method: 'POST' });
+        logAction('✅ Validation client réussie.', 'success'); showToast("Action confirmée.");
+        if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
       } catch (err) { showToast("Erreur de validation."); }
     });
   }
@@ -208,18 +221,18 @@ function App() {
       }
       
       if (actionName === 'WIRE_TRANSFER') { 
-          const warningMsg = `⚠️ AVERTISSEMENT DE SÉCURITÉ CRITIQUE ⚠️\n\nVous êtes actuellement au téléphone.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement ou de vous demander un paiement.\n\nSi la personne au bout du fil vous demande de le faire, c'est une fraude. Raccrochez et signalez l'appel.\n\nVoulez-vous quand même forcer ce virement sous votre propre responsabilité ?`;
-          if (!confirm(warningMsg)) {
-              setActivePage('HOME'); 
-              return;
-          }
-          // Le client force l'action
-          setBalance(prev => prev - finalAmount); 
-          setTransferAmount(''); 
-          setNewBeneficiaryName(''); 
-          setNewBeneficiaryIban('');
-          setActivePage('HOME'); 
-          showToast(`Virement de ${finalAmount.toFixed(2)} € validé sous votre responsabilité.`);
+          setCustomPrompt({
+              title: '⚠️ AVERTISSEMENT CRITIQUE ⚠️',
+              message: `Vous êtes actuellement au téléphone.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement.\n\nSi la personne au bout du fil vous demande de le faire, c'est une fraude. Raccrochez et signalez l'appel.\n\nVoulez-vous forcer ce virement sous votre propre responsabilité ?`,
+              isDanger: true,
+              onConfirm: () => {
+                  setBalance(prev => prev - finalAmount); 
+                  setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
+                  setActivePage('HOME'); 
+                  showToast(`Virement de ${finalAmount.toFixed(2)} € validé sous votre responsabilité.`);
+                  setCustomPrompt(null);
+              }
+          });
           return;
       }
       
@@ -230,24 +243,26 @@ function App() {
 
     if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50 && !isNewBen) {
         setBalance(prev => prev - finalAmount); 
-        setTransferAmount(''); 
-        setActivePage('HOME');
-        showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`); 
+        setTransferAmount(''); setActivePage('HOME'); showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`); 
         return;
     }
 
-    if (!confirm(`SÉCURITÉ PASSIVE\n\nRAPPEL : Les vrais conseillers sont authentifiés en haut de l'écran.\nContinuer de vous-même ?`)) return;
-    
-    if (actionName === 'FREEZE_CARD') { setIsCardFrozen(true); showToast("Carte bloquée."); } 
-    else if (actionName === 'UNFREEZE_CARD') { setIsCardFrozen(false); showToast("Carte débloquée."); } 
-    else if (actionName === 'WIRE_TRANSFER') {
-        setBalance(prev => prev - finalAmount); 
-        setTransferAmount(''); 
-        setNewBeneficiaryName(''); 
-        setNewBeneficiaryIban('');
-        setActivePage('HOME'); 
-        showToast(`Virement de ${finalAmount.toFixed(2)} € validé.`);
-    } else { showToast(`Opération effectuée.`); }
+    setCustomPrompt({
+        title: 'SÉCURITÉ PASSIVE',
+        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\nContinuer de vous-même ?`,
+        isDanger: false,
+        onConfirm: () => {
+            if (actionName === 'FREEZE_CARD') { setIsCardFrozen(true); showToast("Carte bloquée."); } 
+            else if (actionName === 'UNFREEZE_CARD') { setIsCardFrozen(false); showToast("Carte débloquée."); } 
+            else if (actionName === 'WIRE_TRANSFER') {
+                setBalance(prev => prev - finalAmount); 
+                setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
+                setActivePage('HOME'); 
+                showToast(`Virement de ${finalAmount.toFixed(2)} € validé.`);
+            } else { showToast(`Opération effectuée.`); }
+            setCustomPrompt(null);
+        }
+    });
   }
 
   function openAppFromHome() {
@@ -304,6 +319,14 @@ function App() {
         ),
 
         deviceView === 'APP' && e('div', { className: 'app-container' },
+          
+          // --- ECRAN ANYDESK INTÉGRÉ UNIQUEMENT À L'APP BANCAIRE ---
+          isScreenShared && e('div', { className: 'privacy-screen' },
+            e('div', { className: 'icon' }, Icon('visibility_off')),
+            e('h3', null, 'Écran partagé détecté'),
+            e('p', null, 'Pour votre sécurité, CastorBank a masqué vos données. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
+          ),
+
           e('div', { className: 'mobile-header' }, 
             e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: () => { setDeviceView('OS_HOME'); setActivePage('HOME'); } }, Icon('arrow_back_ios'), 'Quitter'),
             e('div', { className: 'profile-pic' }, Icon('person'))
@@ -397,6 +420,16 @@ function App() {
             )
           ),
 
+          // --- NOUVEAU : LA MODALE IN-APP PERSONNALISÉE (Remplace confirm()) ---
+          customPrompt && e('div', { className: 'modal-overlay' },
+            e('div', { className: 'modal' },
+              e('h3', { className: 'modal-title', style: { color: customPrompt.isDanger ? 'var(--danger)' : 'var(--text)' } }, Icon(customPrompt.isDanger ? 'warning' : 'info'), customPrompt.title),
+              e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', marginBottom: '1.5rem' } }, customPrompt.message),
+              e('button', { className: `modal-btn ${customPrompt.isDanger ? 'danger' : 'primary'}`, onClick: customPrompt.onConfirm }, 'Confirmer'),
+              e('button', { className: 'modal-btn secondary', onClick: () => setCustomPrompt(null) }, 'Annuler')
+            )
+          ),
+
           (pendingConfirmation || localFaceIdAction) && e('div', { className: 'modal-overlay' },
             e('div', { className: 'modal' },
               e('div', { style: { textAlign: 'center' } },
@@ -450,7 +483,8 @@ function App() {
           e('h3', null, Icon('dashboard_customize'), 'Actions (Policy Engine)'),
           e('div', { className: 'row' },
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
-            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement (Bloqué)')
+            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement (Bloqué)'),
+            e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, style: { marginLeft: 'auto'}, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler AnyDesk')
           )
         ),
 
@@ -466,6 +500,7 @@ function App() {
         )
       ),
 
+      // --- ONGLET CISO RESTAURÉ ---
       adminTab === 'CISO' && e('div', { className: 'admin-content' },
         e('div', { className: 'ciso-grid' },
           e('div', { className: 'ciso-stat-card green' }, e('div', { className: 'icon' }, Icon('verified_user')), e('p', { className: 'value' }, '12 450'), e('p', { className: 'label' }, 'Appels sécurisés (Aujourd\'hui)')),
@@ -478,7 +513,7 @@ function App() {
           e('ul', { style: { fontSize: '0.9rem', color: '#333', lineHeight: 1.6 } },
             e('li', null, e('strong', null, 'Clonage Vocal / Deepfake :'), ' Bloqué. Sans signature EdDSA, la voix n\'a aucune autorité.'),
             e('li', null, e('strong', null, 'Ingénierie Sociale au Virement :'), ' Bloqué. Action interdite en cours d\'appel.'),
-            e('li', null, e('strong', null, 'Prise de contrôle à distance (AnyDesk) :'), ' Bloqué. Détection native de l\'écran partagé.')
+            e('li', null, e('strong', null, 'Prise de contrôle à distance (AnyDesk) :'), ' Bloqué. Détection native de l\'écran partagé uniquement sur l\'app bancaire.')
           )
         )
       ),
