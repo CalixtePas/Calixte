@@ -50,6 +50,10 @@ function App() {
   const [actionLog, setActionLog] = useState([]);
   const [apiLogs, setApiLogs] = useState([]); 
   const esRef = useRef(null);
+  
+  // Ref pour l'auto-scroll du terminal
+  const terminalRef = useRef(null);
+  const auditRef = useRef(null);
 
   const [activePage, setActivePage] = useState('HOME');
   const [transferAmount, setTransferAmount] = useState(''); 
@@ -60,13 +64,12 @@ function App() {
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
   const [localFaceIdAction, setLocalFaceIdAction] = useState(null); 
+  const [pendingActionData, setPendingActionData] = useState(null); // Stocke les données de l'action en attente de FaceID
   const [scanState, setScanState] = useState('idle');
-
-  // NOUVEAU : État pour remplacer confirm()
   const [customPrompt, setCustomPrompt] = useState(null); 
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
-  const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Conseiller');
+  const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Service Client');
 
   useEffect(() => {
     const updateTime = () => setCurrentTime(new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
@@ -75,16 +78,25 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const logAction = (msg, type = 'info') => setActionLog(prev => [{msg, type, t: new Date().toLocaleTimeString()}, ...prev].slice(0, 50));
+  // Auto-scroll pour les logs et le terminal API
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+  }, [apiLogs, adminTab]);
+
+  useEffect(() => {
+    if (auditRef.current) auditRef.current.scrollTop = auditRef.current.scrollHeight;
+  }, [actionLog, adminTab]);
+
+  const logAction = (msg, type = 'info') => setActionLog(prev => [...prev, {msg, type, t: new Date().toLocaleTimeString()}].slice(-50));
   const showToast = (msg) => { const id = Date.now(); setToasts(prev => [...prev, { id, msg }]); setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000); };
-  const logApiPayload = (direction, route, data) => setApiLogs(prev => [{ t: new Date().toISOString(), direction, route, data }, ...prev]);
+  const logApiPayload = (direction, route, data) => setApiLogs(prev => [...prev, { t: new Date().toISOString(), direction, route, data }]);
 
   function resetState() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setToken(''); setVerified(null); setPayload(null); setInteractionId('');
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
     setIncomingCallParams(null); setIsPhoneCallActive(false); setIsScreenShared(false);
-    setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setScanState('idle'); setCustomPrompt(null);
+    setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setPendingActionData(null); setScanState('idle'); setCustomPrompt(null);
   }
 
   // --- ACTIONS CRM ---
@@ -139,7 +151,11 @@ function App() {
             title: 'Validation Serveur',
             message: `Le serveur demande de valider l'action distante : ${data.action}.`,
             isDanger: false,
-            onConfirm: () => { approveServerAction(data.confirmation_id, data.action); setCustomPrompt(null); }
+            onConfirm: () => { 
+              setCustomPrompt(null);
+              setPendingActionName(data.action); 
+              setPendingConfirmation(data.confirmation_id); 
+            }
           });
         } else if (data.type === 'ALLOW') {
           logAction(`ℹ️ Action autorisée (${data.action}).`); showToast(`Action validée.`);
@@ -183,84 +199,89 @@ function App() {
     }, 1200);
   }
 
-  async function approveServerAction(confId, actionName) {
+  // VALIDATION SERVEUR
+  async function approveServerAction() {
     executeFaceIdScan(async () => {
-      logApiPayload('out', `POST /confirmations/${confId}/approve`, {});
+      logApiPayload('out', `POST /confirmations/${pendingConfirmation}/approve`, {});
       try {
-        await fetch(`${API}/confirmations/${confId}/approve`, { method: 'POST' });
-        logAction('✅ Validation client réussie.', 'success'); showToast("Action confirmée.");
-        if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
+        await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
+        setPendingConfirmation(''); logAction('✅ Validation FaceID réussie.', 'success'); showToast("Action confirmée.");
+        if (pendingActionName === 'FREEZE_CARD') setIsCardFrozen(true);
       } catch (err) { showToast("Erreur de validation."); }
     });
   }
 
+  // EXÉCUTION DE L'ACTION CLIENT APRÈS FACE ID
   function executeLocalFaceId() {
     executeFaceIdScan(() => {
       if (localFaceIdAction === 'REPORT_LOST') {
         setIsCardCanceled(true); setIsCardFrozen(true); showToast("Carte en opposition définitive."); setActivePage('HOME');
+      } else if (localFaceIdAction === 'FREEZE_CARD') {
+        setIsCardFrozen(true); showToast("Carte bloquée temporairement.");
+      } else if (localFaceIdAction === 'UNFREEZE_CARD') {
+        setIsCardFrozen(false); showToast("Carte débloquée.");
+      } else if (localFaceIdAction === 'WIRE_TRANSFER') {
+        setBalance(prev => prev - pendingActionData.amount); 
+        setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
+        setActivePage('HOME'); 
+        showToast(`Virement de ${pendingActionData.amount.toFixed(2)} € validé.`);
       }
       setLocalFaceIdAction(null);
+      setPendingActionData(null);
     });
   }
 
-  // --- ACTIONS CLIENT ---
+  // --- INTERCEPTION DES ACTIONS CLIENT ---
   function handleUserAction(actionName) {
     let finalAmount = parseFloat(transferAmount);
     const isNewBen = transferRecipient === RECIPIENTS[0];
 
+    // Vérification des données du virement
     if (actionName === 'WIRE_TRANSFER') {
         if (isNaN(finalAmount) || finalAmount <= 0) return showToast("Veuillez saisir un montant valide.");
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
     }
 
+    // SI EN APPEL SÉCURISÉ
     if (verified === true) {
+      if (actionName === 'WIRE_TRANSFER' && isNewBen) {
+          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne.\n\nC'est la méthode n°1 des fraudeurs. RACCROCHEZ.`);
+          return;
+      }
+        
       if (summary.cannot.includes(actionName) && actionName !== 'WIRE_TRANSFER') { 
-          setScamAlert(`ALERTE FRAUDE\n\nTentative d'opération interdite pendant un appel.`); 
-          setActivePage('HOME'); 
+          setScamAlert(`ATTENTION\n\nL'appelant tente de vous faire exécuter une action interdite. Raccrochez.`); 
           return; 
       }
       
       if (actionName === 'WIRE_TRANSFER') { 
           setCustomPrompt({
               title: '⚠️ AVERTISSEMENT CRITIQUE ⚠️',
-              message: `Vous êtes actuellement au téléphone.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement.\n\nSi la personne au bout du fil vous demande de le faire, c'est une fraude. Raccrochez et signalez l'appel.\n\nVoulez-vous forcer ce virement sous votre propre responsabilité ?`,
+              message: `Vous êtes actuellement au téléphone.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement ou demander un paiement.\n\nSi la personne au bout du fil vous demande de le faire, c'est une fraude. Raccrochez et signalez l'appel.\n\nVoulez-vous forcer ce virement sous votre propre responsabilité ?`,
               isDanger: true,
               onConfirm: () => {
-                  setBalance(prev => prev - finalAmount); 
-                  setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
-                  setActivePage('HOME'); 
-                  showToast(`Virement de ${finalAmount.toFixed(2)} € validé sous votre responsabilité.`);
                   setCustomPrompt(null);
+                  setPendingActionData({ amount: finalAmount });
+                  setLocalFaceIdAction(actionName); // Déclenche Face ID
               }
           });
           return;
       }
       
-      if (actionName === 'FREEZE_CARD') setIsCardFrozen(true);
-      if (actionName === 'UNFREEZE_CARD') setIsCardFrozen(false);
-      showToast(`Action exécutée.`); return;
+      // Actions de la carte pendant l'appel déclenchent Face ID aussi
+      setLocalFaceIdAction(actionName);
+      return;
     }
 
-    if (actionName === 'WIRE_TRANSFER' && finalAmount <= 50 && !isNewBen) {
-        setBalance(prev => prev - finalAmount); 
-        setTransferAmount(''); setActivePage('HOME'); showToast(`Virement de ${finalAmount.toFixed(2)} € envoyé.`); 
-        return;
-    }
-
+    // SI HORS APPEL
     setCustomPrompt({
         title: 'SÉCURITÉ PASSIVE',
-        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\nContinuer de vous-même ?`,
+        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\nÊtes-vous sûr de vouloir continuer cette action sensible ?`,
         isDanger: false,
         onConfirm: () => {
-            if (actionName === 'FREEZE_CARD') { setIsCardFrozen(true); showToast("Carte bloquée."); } 
-            else if (actionName === 'UNFREEZE_CARD') { setIsCardFrozen(false); showToast("Carte débloquée."); } 
-            else if (actionName === 'WIRE_TRANSFER') {
-                setBalance(prev => prev - finalAmount); 
-                setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
-                setActivePage('HOME'); 
-                showToast(`Virement de ${finalAmount.toFixed(2)} € validé.`);
-            } else { showToast(`Opération effectuée.`); }
             setCustomPrompt(null);
+            if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
+            setLocalFaceIdAction(actionName); // Redirige systématiquement vers Face ID
         }
     });
   }
@@ -282,6 +303,14 @@ function App() {
     const a = document.createElement('a'); a.href = url; a.download = `castor_compliance_${report.compliance_id}.json`; a.click();
     logAction("📄 Rapport d'Audit de Conformité généré.", "success");
   }
+
+  // --- TEXTE DYNAMIQUE DU MODAL FACE ID ---
+  let faceIdMessage = "Autoriser l'action ?";
+  if (pendingConfirmation) faceIdMessage = `Le serveur demande de valider l'action : ${pendingActionName}`;
+  else if (localFaceIdAction === 'REPORT_LOST') faceIdMessage = "Confirmer l'opposition définitive de votre carte ?";
+  else if (localFaceIdAction === 'FREEZE_CARD') faceIdMessage = "Confirmer le blocage de la carte ?";
+  else if (localFaceIdAction === 'UNFREEZE_CARD') faceIdMessage = "Confirmer le déblocage de la carte ?";
+  else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer le virement de ${pendingActionData.amount.toFixed(2)} € ?`;
 
   return e('div', { className: 'demo-container' },
     
@@ -320,7 +349,7 @@ function App() {
 
         deviceView === 'APP' && e('div', { className: 'app-container' },
           
-          // --- ECRAN ANYDESK INTÉGRÉ UNIQUEMENT À L'APP BANCAIRE ---
+          // ECRAN ANYDESK INTÉGRÉ UNIQUEMENT À L'APP BANCAIRE
           isScreenShared && e('div', { className: 'privacy-screen' },
             e('div', { className: 'icon' }, Icon('visibility_off')),
             e('h3', null, 'Écran partagé détecté'),
@@ -342,7 +371,10 @@ function App() {
               (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
               e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
               e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
-              e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092')
+              e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end'} }, 
+                e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092'),
+                e('div', { style: { fontSize: '0.8rem', opacity: 0.9, fontWeight:500 } }, 'Gérer >')
+              )
             ),
 
             e('div', { className: 'action-grid' },
@@ -359,7 +391,6 @@ function App() {
             )
           ),
 
-          // --- LE FORMULAIRE DE VIREMENT COMPLET ---
           activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
             e('div', { className: 'page-header' }, 
               e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), 
@@ -400,7 +431,19 @@ function App() {
               e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, style: { margin: '0 0 2rem 0', cursor: 'default' } },
                 (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
                 e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Visa Premier'),
-                e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX' : '**** **** 4092')
+                e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX XXXX' : '**** **** **** 4092'),
+                e('div', { style: { display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', opacity: 0.8, fontSize: '0.9rem' } },
+                  e('span', null, 'ALEXANDRE DUPONT'), e('span', null, '12/28')
+                )
+              ),
+              e('div', { className: 'menu-list' },
+                e('div', { className: 'menu-item' },
+                  e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('speed')), e('div', null, e('h4', null, 'Plafonds de paiement'), e('p', null, 'Utilisé : 450€ / 2500€'))), Icon('chevron_right')
+                ),
+                e('div', { className: 'menu-item' },
+                  e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('language')), e('div', null, e('h4', null, 'Paiements sur internet'), e('p', null, onlinePayments && !isCardCanceled ? 'Activés' : 'Désactivés'))),
+                  e('label', { className: 'switch' }, e('input', { type: 'checkbox', disabled: isCardCanceled, checked: onlinePayments && !isCardCanceled, onChange: () => setOnlinePayments(!onlinePayments) }), e('span', { className: 'slider' }))
+                )
               ),
               e('div', { className: 'menu-list' },
                 e('div', { className: 'menu-item' }, e('div', { className: 'menu-item-info' }, e('div', { className: 'icon', style: { background: isCardCanceled ? '#eee' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), e('div', null, e('h4', null, isCardCanceled ? 'Opposition' : (isCardFrozen ? 'Débloquer' : 'Bloquer temporairement')))),
@@ -420,24 +463,24 @@ function App() {
             )
           ),
 
-          // --- NOUVEAU : LA MODALE IN-APP PERSONNALISÉE (Remplace confirm()) ---
           customPrompt && e('div', { className: 'modal-overlay' },
             e('div', { className: 'modal' },
               e('h3', { className: 'modal-title', style: { color: customPrompt.isDanger ? 'var(--danger)' : 'var(--text)' } }, Icon(customPrompt.isDanger ? 'warning' : 'info'), customPrompt.title),
               e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', marginBottom: '1.5rem' } }, customPrompt.message),
-              e('button', { className: `modal-btn ${customPrompt.isDanger ? 'danger' : 'primary'}`, onClick: customPrompt.onConfirm }, 'Confirmer'),
+              e('button', { className: `modal-btn ${customPrompt.isDanger ? 'danger' : 'primary'}`, onClick: customPrompt.onConfirm }, 'Continuer'),
               e('button', { className: 'modal-btn secondary', onClick: () => setCustomPrompt(null) }, 'Annuler')
             )
           ),
 
+          // L'ANIMATION FACE ID POUR TOUTES LES ACTIONS SENSIBLES
           (pendingConfirmation || localFaceIdAction) && e('div', { className: 'modal-overlay' },
             e('div', { className: 'modal' },
               e('div', { style: { textAlign: 'center' } },
                 e('div', { className: `face-id-wrapper ${scanState}` }, e('div', { className: 'face-id-icon' }, Icon(scanState === 'success' ? 'check_circle' : 'face')), e('div', { className: 'face-id-scanner' })),
                 e('h3', { className: 'modal-title', style: { justifyContent: 'center' } }, scanState === 'success' ? 'Vérifié' : 'Face ID'),
-                e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '2rem' } }, `Autoriser l'action ?`),
+                e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '2rem' } }, faceIdMessage),
                 e('button', { className: 'modal-btn primary', onClick: pendingConfirmation ? approveServerAction : executeLocalFaceId, disabled: busy || scanState !== 'idle' }, 'Scanner mon visage'),
-                e('button', { className: 'modal-btn secondary', onClick: () => { setPendingConfirmation(''); setLocalFaceIdAction(null); }, disabled: scanState !== 'idle' }, 'Annuler')
+                e('button', { className: 'modal-btn secondary', onClick: () => { setPendingConfirmation(''); setLocalFaceIdAction(null); setPendingActionData(null); }, disabled: scanState !== 'idle' }, 'Annuler')
               )
             )
           ),
@@ -493,14 +536,13 @@ function App() {
             e('h3', {style: {border: 'none', padding: 0, margin: 0}}, Icon('history'), 'Piste d\'audit'),
             e('button', { className: 'control-btn success', onClick: exportAuditReport }, Icon('download'), 'Export Conformité JSON')
           ),
-          e('div', { className: 'logs' },
+          e('div', { className: 'logs', ref: auditRef },
             actionLog.length === 0 && e('div', null, '> En attente...'),
             actionLog.map((log, i) => e('div', { key: i, className: log.type }, `[${log.t}] ${log.msg}`))
           )
         )
       ),
 
-      // --- ONGLET CISO RESTAURÉ ---
       adminTab === 'CISO' && e('div', { className: 'admin-content' },
         e('div', { className: 'ciso-grid' },
           e('div', { className: 'ciso-stat-card green' }, e('div', { className: 'icon' }, Icon('verified_user')), e('p', { className: 'value' }, '12 450'), e('p', { className: 'label' }, 'Appels sécurisés (Aujourd\'hui)')),
@@ -521,7 +563,7 @@ function App() {
       adminTab === 'DEVELOPER' && e('div', { className: 'admin-content' },
         e('h3', { style: { margin: 0, fontSize: '1.1rem' } }, 'Flux API & Preuves Cryptographiques'),
         e('p', { style: { fontSize: '0.85rem', color: '#666', marginTop: 0 } }, 'Visualisez les payloads réels traités par le moteur Castor en temps réel.'),
-        e('div', { className: 'api-terminal' },
+        e('div', { className: 'api-terminal', ref: terminalRef },
           apiLogs.length === 0 && e('div', null, '// En attente de requêtes API...'),
           apiLogs.map((log, i) => e('div', { key: i, className: 'api-log-entry' },
             e('div', { className: 'api-log-time' }, log.t),
