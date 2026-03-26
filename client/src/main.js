@@ -134,9 +134,13 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      setDeviceView('APP');
-      setHasPushNotif(false);
-      setShowPermissionsPopup(true);
+      // On respecte la vue actuelle de l'utilisateur
+      if (deviceView === 'OS_HOME') {
+        setHasPushNotif(true);
+      } else {
+        setShowPermissionsPopup(true);
+      }
+      
       logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
 
       if (esRef.current) esRef.current.close();
@@ -538,11 +542,11 @@ function App() {
           )
         ),
 
-        e('div', { className: 'admin-card' },
-          e('h3', null, Icon('dashboard_customize'), 'Simulations & Policy Engine'),
+        e('div', { className: 'admin-card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
+          e('h3', null, Icon('dashboard_customize'), 'Actions (Policy Engine)'),
           e('div', { className: 'row' },
-            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD'), disabled: !verified, style: { opacity: verified ? 1 : 0.5 } }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
-            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER'), disabled: !verified, style: { opacity: verified ? 1 : 0.5 } }, Icon('sync_alt'), 'Virement (Bloqué)'),
+            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
+            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement (Bloqué)'),
             e('div', { style: { display: 'flex', gap: '0.75rem', marginLeft: 'auto' } },
               e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler AnyDesk'),
               e('button', { className: `control-btn ${isRecording ? 'primary' : 'warning'}`, onClick: simulateRecording }, Icon(isRecording ? 'videocam_off' : 'videocam'), isRecording ? 'Arrêter Enreg.' : 'Simuler Enregistrement')
