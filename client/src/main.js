@@ -51,7 +51,6 @@ function App() {
   const [apiLogs, setApiLogs] = useState([]); 
   const esRef = useRef(null);
   
-  // Ref pour l'auto-scroll du terminal
   const terminalRef = useRef(null);
   const auditRef = useRef(null);
 
@@ -64,7 +63,7 @@ function App() {
   const [pendingConfirmation, setPendingConfirmation] = useState('');
   const [pendingActionName, setPendingActionName] = useState('');
   const [localFaceIdAction, setLocalFaceIdAction] = useState(null); 
-  const [pendingActionData, setPendingActionData] = useState(null); // Stocke les données de l'action en attente de FaceID
+  const [pendingActionData, setPendingActionData] = useState(null); 
   const [scanState, setScanState] = useState('idle');
   const [customPrompt, setCustomPrompt] = useState(null); 
 
@@ -78,7 +77,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-scroll pour les logs et le terminal API
   useEffect(() => {
     if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
   }, [apiLogs, adminTab]);
@@ -225,6 +223,10 @@ function App() {
         setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
         setActivePage('HOME'); 
         showToast(`Virement de ${pendingActionData.amount.toFixed(2)} € validé.`);
+      } else if (localFaceIdAction === 'ASK_OTP') {
+        showToast("Code OTP sécurisé : 849 201");
+      } else if (localFaceIdAction === 'DISCUSS_CASE') {
+        showToast("Ouverture de la messagerie sécurisée.");
       }
       setLocalFaceIdAction(null);
       setPendingActionData(null);
@@ -236,7 +238,6 @@ function App() {
     let finalAmount = parseFloat(transferAmount);
     const isNewBen = transferRecipient === RECIPIENTS[0];
 
-    // Vérification des données du virement
     if (actionName === 'WIRE_TRANSFER') {
         if (isNaN(finalAmount) || finalAmount <= 0) return showToast("Veuillez saisir un montant valide.");
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
@@ -262,26 +263,32 @@ function App() {
               onConfirm: () => {
                   setCustomPrompt(null);
                   setPendingActionData({ amount: finalAmount });
-                  setLocalFaceIdAction(actionName); // Déclenche Face ID
+                  setLocalFaceIdAction(actionName); 
               }
           });
           return;
       }
       
-      // Actions de la carte pendant l'appel déclenchent Face ID aussi
       setLocalFaceIdAction(actionName);
       return;
     }
 
     // SI HORS APPEL
+    let specificWarning = "";
+    if (actionName === 'WIRE_TRANSFER') {
+        specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de faire un virement.\n\n";
+    } else if (actionName === 'ASK_OTP') {
+        specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de lui dicter un code OTP.\n\n";
+    }
+
     setCustomPrompt({
         title: 'SÉCURITÉ PASSIVE',
-        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\nÊtes-vous sûr de vouloir continuer cette action sensible ?`,
+        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\n${specificWarning}Êtes-vous sûr de vouloir continuer cette action sensible ?`,
         isDanger: false,
         onConfirm: () => {
             setCustomPrompt(null);
             if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
-            setLocalFaceIdAction(actionName); // Redirige systématiquement vers Face ID
+            setLocalFaceIdAction(actionName);
         }
     });
   }
@@ -311,6 +318,7 @@ function App() {
   else if (localFaceIdAction === 'FREEZE_CARD') faceIdMessage = "Confirmer le blocage de la carte ?";
   else if (localFaceIdAction === 'UNFREEZE_CARD') faceIdMessage = "Confirmer le déblocage de la carte ?";
   else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer le virement de ${pendingActionData.amount.toFixed(2)} € ?`;
+  else if (localFaceIdAction === 'ASK_OTP') faceIdMessage = "Confirmer la génération d'un code OTP ?";
 
   return e('div', { className: 'demo-container' },
     
@@ -349,7 +357,6 @@ function App() {
 
         deviceView === 'APP' && e('div', { className: 'app-container' },
           
-          // ECRAN ANYDESK INTÉGRÉ UNIQUEMENT À L'APP BANCAIRE
           isScreenShared && e('div', { className: 'privacy-screen' },
             e('div', { className: 'icon' }, Icon('visibility_off')),
             e('h3', null, 'Écran partagé détecté'),
@@ -472,7 +479,6 @@ function App() {
             )
           ),
 
-          // L'ANIMATION FACE ID POUR TOUTES LES ACTIONS SENSIBLES
           (pendingConfirmation || localFaceIdAction) && e('div', { className: 'modal-overlay' },
             e('div', { className: 'modal' },
               e('div', { style: { textAlign: 'center' } },
