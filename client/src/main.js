@@ -25,6 +25,7 @@ const OS_APPS = [
 
 function App() {
   const [deviceView, setDeviceView] = useState('OS_HOME'); 
+  const [isAppUnlocked, setIsAppUnlocked] = useState(false); // NOUVEAU : État de verrouillage de l'app
   const [adminTab, setAdminTab] = useState('CRM');
   const [currentTime, setCurrentTime] = useState('');
   
@@ -134,11 +135,12 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // On respecte la vue actuelle de l'utilisateur
-      if (deviceView === 'OS_HOME') {
-        setHasPushNotif(true);
-      } else {
-        setShowPermissionsPopup(true);
+      setDeviceView('APP');
+      setHasPushNotif(false);
+      
+      // Si l'app est déjà déverrouillée, on montre la popup direct, sinon elle s'affichera après le FaceID de l'app.
+      if (isAppUnlocked) {
+          setShowPermissionsPopup(true);
       }
       
       logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
@@ -208,7 +210,6 @@ function App() {
     }, 1200);
   }
 
-  // VALIDATION SERVEUR
   async function approveServerAction() {
     executeFaceIdScan(async () => {
       logApiPayload('out', `POST /confirmations/${pendingConfirmation}/approve`, {});
@@ -220,10 +221,12 @@ function App() {
     });
   }
 
-  // EXÉCUTION DE L'ACTION CLIENT APRÈS FACE ID
   function executeLocalFaceId() {
     executeFaceIdScan(() => {
-      if (localFaceIdAction === 'REPORT_LOST') {
+      if (localFaceIdAction === 'APP_LOGIN') {
+          setIsAppUnlocked(true);
+          if (verified) setShowPermissionsPopup(true); // Affiche l'alerte d'appel si on ouvre l'app pendant un appel Castor
+      } else if (localFaceIdAction === 'REPORT_LOST') {
         setIsCardCanceled(true); setIsCardFrozen(true); showToast("Carte en opposition définitive."); setActivePage('HOME');
       } else if (localFaceIdAction === 'FREEZE_CARD') {
         setIsCardFrozen(true); showToast("Carte bloquée temporairement.");
@@ -244,18 +247,15 @@ function App() {
     });
   }
 
-  // --- INTERCEPTION DES ACTIONS CLIENT ---
   function handleUserAction(actionName) {
     let finalAmount = parseFloat(transferAmount);
     const isNewBen = transferRecipient === RECIPIENTS[0];
 
-    // Vérification des données du virement
     if (actionName === 'WIRE_TRANSFER') {
         if (isNaN(finalAmount) || finalAmount <= 0) return showToast("Veuillez saisir un montant valide.");
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
     }
 
-    // SI EN APPEL SÉCURISÉ
     if (verified === true) {
       if (actionName === 'WIRE_TRANSFER' && isNewBen) {
           setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne.\n\nC'est la méthode n°1 des fraudeurs. RACCROCHEZ.`);
@@ -275,18 +275,16 @@ function App() {
               onConfirm: () => {
                   setCustomPrompt(null);
                   setPendingActionData({ amount: finalAmount });
-                  setLocalFaceIdAction(actionName); // Déclenche Face ID
+                  setLocalFaceIdAction(actionName); 
               }
           });
           return;
       }
       
-      // Actions de la carte pendant l'appel déclenchent Face ID aussi
       setLocalFaceIdAction(actionName);
       return;
     }
 
-    // SI HORS APPEL
     let specificWarning = "";
     if (actionName === 'WIRE_TRANSFER') {
         specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de faire un virement.\n\n";
@@ -301,7 +299,7 @@ function App() {
         onConfirm: () => {
             setCustomPrompt(null);
             if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
-            setLocalFaceIdAction(actionName); // Redirige systématiquement vers Face ID
+            setLocalFaceIdAction(actionName); 
         }
     });
   }
@@ -309,7 +307,18 @@ function App() {
   function openAppFromHome() {
     setDeviceView('APP');
     setHasPushNotif(false);
-    if (verified) setShowPermissionsPopup(true);
+    // Au lieu de montrer directement les comptes ou la popup, on demande Face ID pour ouvrir l'app
+    if (!isAppUnlocked) {
+        setLocalFaceIdAction('APP_LOGIN');
+    } else if (verified) {
+        setShowPermissionsPopup(true);
+    }
+  }
+
+  function quitApp() {
+      setDeviceView('OS_HOME');
+      setActivePage('HOME');
+      setIsAppUnlocked(false); // On verrouille l'app quand on la quitte
   }
 
   function exportAuditReport() {
@@ -324,10 +333,10 @@ function App() {
     logAction("📄 Rapport d'Audit de Conformité généré.", "success");
   }
 
-  // --- TEXTE DYNAMIQUE DU MODAL FACE ID ---
   let faceIdMessage = "Autoriser l'action ?";
   if (pendingConfirmation) faceIdMessage = `Le serveur demande de valider l'action : ${pendingActionName}`;
-  else if (localFaceIdAction === 'REPORT_LOST') faceIdMessage = "Confirmer l'opposition définitive de votre carte ?";
+  else if (localFaceIdAction === 'APP_LOGIN') faceIdMessage = "Ouvrir CastorBank";
+  else if (localFaceIdAction === 'REPORT_LOST') faceIdMessage = "Confirmer l'opposition définitive ?";
   else if (localFaceIdAction === 'FREEZE_CARD') faceIdMessage = "Confirmer le blocage de la carte ?";
   else if (localFaceIdAction === 'UNFREEZE_CARD') faceIdMessage = "Confirmer le déblocage de la carte ?";
   else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer le virement de ${pendingActionData.amount.toFixed(2)} € ?`;
@@ -370,108 +379,118 @@ function App() {
 
         deviceView === 'APP' && e('div', { className: 'app-container' },
           
-          // ECRAN ANYDESK OU ENREGISTREMENT INTÉGRÉ UNIQUEMENT À L'APP BANCAIRE
           (isScreenShared || isRecording) && e('div', { className: 'privacy-screen' },
             e('div', { className: 'icon' }, Icon(isRecording ? 'videocam' : 'visibility_off')),
             e('h3', null, isRecording ? 'Enregistrement d\'écran détecté' : 'Écran partagé détecté'),
             e('p', null, isRecording ? 'Pour votre sécurité, CastorBank a bloqué l\'enregistrement vidéo de vos données sensibles.' : 'Pour votre sécurité, CastorBank a masqué vos données. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
           ),
 
-          e('div', { className: 'mobile-header' }, 
-            e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: () => { setDeviceView('OS_HOME'); setActivePage('HOME'); } }, Icon('arrow_back_ios'), 'Quitter'),
-            e('div', { className: 'profile-pic' }, Icon('person'))
+          // VUE : SPLASH SCREEN VERROUILLÉ
+          !isAppUnlocked && e('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' } },
+              e('div', { style: { color: 'var(--primary)', fontSize: '4rem', marginBottom: '1rem' } }, Icon('account_balance')),
+              e('h2', { style: { margin: 0, color: '#111' } }, 'CastorBank'),
+              e('p', { style: { color: '#666', fontSize: '0.9rem', marginBottom: '3rem' } }, 'Authentification requise'),
+              e('button', { className: 'btn-primary', style: { width: '80%', padding: '1rem 2rem' }, onClick: () => setLocalFaceIdAction('APP_LOGIN') }, Icon('face'), 'Déverrouiller avec Face ID')
           ),
 
-          verified === true && e('div', { className: 'call-banner verified' }, 
-            e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('lock'), `Appel : ${actorName}`),
-            e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
-          ),
+          // VUE : APPLICATION DÉVERROUILLÉE
+          isAppUnlocked && e(React.Fragment, null, 
+            e('div', { className: 'mobile-header' }, 
+              e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: quitApp }, Icon('arrow_back_ios'), 'Quitter'),
+              e('div', { className: 'profile-pic' }, Icon('person'))
+            ),
 
-          e('div', { className: 'mobile-content' },
-            e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, onClick: () => setActivePage('CARD') },
-              (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
-              e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
-              e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
-              e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end'} }, 
-                e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092'),
-                e('div', { style: { fontSize: '0.8rem', opacity: 0.9, fontWeight:500 } }, 'Gérer >')
+            verified === true && e('div', { className: 'call-banner verified' }, 
+              e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('lock'), `Appel : ${actorName}`),
+              e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
+            ),
+
+            e('div', { className: 'mobile-content' },
+              e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, onClick: () => setActivePage('CARD') },
+                (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
+                e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Compte Courant'),
+                e('div', { className: 'balance' }, `${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €`),
+                e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end'} }, 
+                  e('div', { style: { fontFamily: 'monospace', opacity: 0.6, fontSize: '0.8rem' } }, '**** **** 4092'),
+                  e('div', { style: { fontSize: '0.8rem', opacity: 0.9, fontWeight:500 } }, 'Gérer >')
+                )
+              ),
+
+              e('div', { className: 'action-grid' },
+                e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
+                e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
+                e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
+                e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
+              ),
+              
+              e('h3', { style: { fontSize: '1rem', marginTop: '1.5rem', marginBottom: '1rem' } }, 'Opérations récentes'),
+              e('div', { className: 'tx-list' }, 
+                e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
+                e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
               )
             ),
 
-            e('div', { className: 'action-grid' },
-              e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
-              e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
-              e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-              e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
-            ),
-            
-            e('h3', { style: { fontSize: '1rem', marginTop: '1.5rem', marginBottom: '1rem' } }, 'Opérations récentes'),
-            e('div', { className: 'tx-list' }, 
-              e('div', { className: 'tx-item' }, e('span', null, 'Netflix'), e('span', null, '- 13,99 €')),
-              e('div', { className: 'tx-item' }, e('span', null, 'Salaire Castor'), e('span', {style: {color: 'var(--success)'}}, '+ 2 150,00 €'))
-            )
-          ),
-
-          activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
-            e('div', { className: 'page-header' }, 
-              e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), 
-              e('h3', null, 'Nouveau Virement')
-            ),
-            e('div', { className: 'page-content' },
-              e('div', { className: 'form-group' }, 
-                e('label', null, 'Compte à débiter'), 
-                e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €)`))
+            activePage === 'TRANSFER' && e('div', { className: 'mobile-page' },
+              e('div', { className: 'page-header' }, 
+                e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), 
+                e('h3', null, 'Nouveau Virement')
               ),
-              e('div', { className: 'form-group' }, 
-                e('label', null, 'Bénéficiaire'), 
-                e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) }, 
-                  RECIPIENTS.map(r => e('option', { key: r, value: r }, r))
-                )
-              ),
-              transferRecipient === RECIPIENTS[0] && e(React.Fragment, null, 
+              e('div', { className: 'page-content' },
                 e('div', { className: 'form-group' }, 
-                  e('label', null, 'Nom du bénéficiaire'), 
-                  e('input', { type: 'text', placeholder: 'Ex: Garage Martin', value: newBeneficiaryName, onChange: (evt) => setNewBeneficiaryName(evt.target.value) })
-                ), 
-                e('div', { className: 'form-group' }, 
-                  e('label', null, 'IBAN'), 
-                  e('input', { type: 'text', placeholder: 'FR76...', value: newBeneficiaryIban, onChange: (evt) => setNewBeneficiaryIban(evt.target.value) })
-                )
-              ),
-              e('div', { className: 'form-group' }, 
-                e('label', null, 'Montant du virement (€)'), 
-                e('input', { type: 'number', min: '1', placeholder: '0.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })
-              ),
-              e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Valider le virement')
-            )
-          ),
-
-          activePage === 'CARD' && e('div', { className: 'mobile-page' },
-            e('div', { className: 'page-header' }, e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), e('h3', null, 'Ma carte')),
-            e('div', { className: 'page-content' },
-              e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, style: { margin: '0 0 2rem 0', cursor: 'default' } },
-                (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
-                e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Visa Premier'),
-                e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX XXXX' : '**** **** **** 4092'),
-                e('div', { style: { display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', opacity: 0.8, fontSize: '0.9rem' } },
-                  e('span', null, 'ALEXANDRE DUPONT'), e('span', null, '12/28')
-                )
-              ),
-              e('div', { className: 'menu-list' },
-                e('div', { className: 'menu-item' },
-                  e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('speed')), e('div', null, e('h4', null, 'Plafonds de paiement'), e('p', null, 'Utilisé : 450€ / 2500€'))), Icon('chevron_right')
+                  e('label', null, 'Compte à débiter'), 
+                  e('select', { disabled: true }, e('option', null, `Compte Courant (${balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €)`))
                 ),
-                e('div', { className: 'menu-item' },
-                  e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('language')), e('div', null, e('h4', null, 'Paiements sur internet'), e('p', null, onlinePayments && !isCardCanceled ? 'Activés' : 'Désactivés'))),
-                  e('label', { className: 'switch' }, e('input', { type: 'checkbox', disabled: isCardCanceled, checked: onlinePayments && !isCardCanceled, onChange: () => setOnlinePayments(!onlinePayments) }), e('span', { className: 'slider' }))
-                )
-              ),
-              e('div', { className: 'menu-list' },
-                e('div', { className: 'menu-item' }, e('div', { className: 'menu-item-info' }, e('div', { className: 'icon', style: { background: isCardCanceled ? '#eee' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), e('div', null, e('h4', null, isCardCanceled ? 'Opposition' : (isCardFrozen ? 'Débloquer' : 'Bloquer temporairement')))),
-                  isCardCanceled ? null : e('label', { className: 'switch' }, e('input', { type: 'checkbox', checked: isCardFrozen, onChange: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }), e('span', { className: 'slider' }))
-                )
-              ),
-              !isCardCanceled && e('button', { className: 'btn-danger', onClick: () => setLocalFaceIdAction('REPORT_LOST') }, Icon('warning'), 'Signaler volée ou perdue')
+                e('div', { className: 'form-group' }, 
+                  e('label', null, 'Bénéficiaire'), 
+                  e('select', { value: transferRecipient, onChange: (e) => setTransferRecipient(e.target.value) }, 
+                    RECIPIENTS.map(r => e('option', { key: r, value: r }, r))
+                  )
+                ),
+                transferRecipient === RECIPIENTS[0] && e(React.Fragment, null, 
+                  e('div', { className: 'form-group' }, 
+                    e('label', null, 'Nom du bénéficiaire'), 
+                    e('input', { type: 'text', placeholder: 'Ex: Garage Martin', value: newBeneficiaryName, onChange: (evt) => setNewBeneficiaryName(evt.target.value) })
+                  ), 
+                  e('div', { className: 'form-group' }, 
+                    e('label', null, 'IBAN'), 
+                    e('input', { type: 'text', placeholder: 'FR76...', value: newBeneficiaryIban, onChange: (evt) => setNewBeneficiaryIban(evt.target.value) })
+                  )
+                ),
+                e('div', { className: 'form-group' }, 
+                  e('label', null, 'Montant du virement (€)'), 
+                  e('input', { type: 'number', min: '1', placeholder: '0.00', value: transferAmount, onChange: (evt) => setTransferAmount(evt.target.value) })
+                ),
+                e('button', { className: 'btn-primary', onClick: () => handleUserAction('WIRE_TRANSFER') }, 'Valider le virement')
+              )
+            ),
+
+            activePage === 'CARD' && e('div', { className: 'mobile-page' },
+              e('div', { className: 'page-header' }, e('div', { className: 'back-btn', onClick: () => setActivePage('HOME') }, Icon('arrow_back')), e('h3', null, 'Ma carte')),
+              e('div', { className: 'page-content' },
+                e('div', { className: `bank-card ${isCardCanceled ? 'canceled' : (isCardFrozen ? 'frozen' : '')}`, style: { margin: '0 0 2rem 0', cursor: 'default' } },
+                  (isCardFrozen || isCardCanceled) && e('div', { className: `frozen-badge ${isCardCanceled ? 'canceled' : ''}` }, Icon(isCardCanceled ? 'warning' : 'ac_unit'), isCardCanceled ? 'OPPOSITION' : 'BLOQUÉE'),
+                  e('div', { style: { fontSize: '0.9rem', opacity: 0.8 } }, 'Visa Premier'),
+                  e('div', { className: 'balance', style: { fontSize: '1.5rem', marginTop: '2rem' } }, isCardCanceled ? 'XXXX XXXX XXXX XXXX' : '**** **** **** 4092'),
+                  e('div', { style: { display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', opacity: 0.8, fontSize: '0.9rem' } },
+                    e('span', null, 'ALEXANDRE DUPONT'), e('span', null, '12/28')
+                  )
+                ),
+                e('div', { className: 'menu-list' },
+                  e('div', { className: 'menu-item' },
+                    e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('speed')), e('div', null, e('h4', null, 'Plafonds de paiement'), e('p', null, 'Utilisé : 450€ / 2500€'))), Icon('chevron_right')
+                  ),
+                  e('div', { className: 'menu-item' },
+                    e('div', { className: 'menu-item-info' }, e('div', { className: 'icon' }, Icon('language')), e('div', null, e('h4', null, 'Paiements sur internet'), e('p', null, onlinePayments && !isCardCanceled ? 'Activés' : 'Désactivés'))),
+                    e('label', { className: 'switch' }, e('input', { type: 'checkbox', disabled: isCardCanceled, checked: onlinePayments && !isCardCanceled, onChange: () => setOnlinePayments(!onlinePayments) }), e('span', { className: 'slider' }))
+                  )
+                ),
+                e('div', { className: 'menu-list' },
+                  e('div', { className: 'menu-item' }, e('div', { className: 'menu-item-info' }, e('div', { className: 'icon', style: { background: isCardCanceled ? '#eee' : (isCardFrozen ? '#f0f4ff' : '#fff0f0'), color: isCardCanceled ? '#666' : (isCardFrozen ? 'var(--primary)' : 'var(--danger)') } }, Icon(isCardCanceled ? 'block' : (isCardFrozen ? 'lock_open' : 'ac_unit'))), e('div', null, e('h4', null, isCardCanceled ? 'Opposition' : (isCardFrozen ? 'Débloquer' : 'Bloquer temporairement')))),
+                    isCardCanceled ? null : e('label', { className: 'switch' }, e('input', { type: 'checkbox', checked: isCardFrozen, onChange: () => handleUserAction(isCardFrozen ? 'UNFREEZE_CARD' : 'FREEZE_CARD') }), e('span', { className: 'slider' }))
+                  )
+                ),
+                !isCardCanceled && e('button', { className: 'btn-danger', onClick: () => setLocalFaceIdAction('REPORT_LOST') }, Icon('warning'), 'Signaler volée ou perdue')
+              )
             )
           ),
 
@@ -509,7 +528,7 @@ function App() {
             e('div', { className: 'modal' },
               e('h3', { className: 'modal-title', style: { color: 'var(--danger)' } }, Icon('warning'), 'Arrêtez tout'),
               e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', marginBottom: '1.5rem' } }, scamAlert),
-              e('button', { className: 'modal-btn danger', onClick: () => { resetState(); setDeviceView('OS_HOME'); } }, 'Raccrocher et quitter')
+              e('button', { className: 'modal-btn danger', onClick: () => { resetState(); setDeviceView('OS_HOME'); setIsAppUnlocked(false); } }, 'Raccrocher et quitter')
             )
           ),
 
