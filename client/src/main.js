@@ -134,7 +134,7 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // GESTION DU BACKGROUND : On ne force plus l'ouverture de l'app.
+      // GESTION DU BACKGROUND
       if (deviceView === 'OS_HOME') {
         setHasPushNotif(true);
       } else {
@@ -254,9 +254,7 @@ function App() {
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
     }
 
-    // SI EN APPEL SÉCURISÉ (Le Honeypot & Le Liability Shift)
     if (verified === true) {
-      // HONEYPOT OTP : L'utilisateur clique, le piège se referme sur le fraudeur.
       if (actionName === 'ASK_OTP') {
           setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. S'il vous le demande, c'est un fraudeur.\n\nRACCROCHEZ IMMÉDIATEMENT.`);
           return;
@@ -285,7 +283,6 @@ function App() {
       return;
     }
 
-    // SI HORS APPEL
     let specificWarning = "";
     if (actionName === 'WIRE_TRANSFER') {
         specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de faire un virement.\n\n";
@@ -418,7 +415,6 @@ function App() {
                 e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
                 e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
                 e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-                // Le bouton OTP reste visuellement normal (HONEYPOT)
                 e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
               ),
               
@@ -553,7 +549,6 @@ function App() {
             e('div', null, e('h3', { style: { margin: '0 0 0.25rem 0', borderBottom: 'none', padding: 0 } }, 'Alexandre Dupont'), e('p', { style: { margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' } }, 'ID : 09843-AX | Seg: Particulier')),
             e('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' } },
               e('div', { className: `crm-status-badge ${verified ? 'secure' : 'idle'}` }, Icon(verified ? 'lock' : 'lock_open'), verified ? 'Canal Chiffré' : 'Non authentifié'),
-              // LE HEARTBEAT DE L'APPLICATION
               verified && e('div', { className: `crm-status-badge ${deviceView === 'APP' ? 'active' : 'idle'}` }, Icon('smartphone'), deviceView === 'APP' ? 'App ouverte (Bannière)' : 'App en arrière-plan')
             )
           ),
@@ -564,11 +559,11 @@ function App() {
           )
         ),
 
-        e('div', { className: 'admin-card', style: { opacity: verified ? 1 : 0.5, pointerEvents: verified ? 'auto' : 'none' } },
-          e('h3', null, Icon('dashboard_customize'), 'Actions (Policy Engine)'),
+        e('div', { className: 'admin-card' },
+          e('h3', null, Icon('dashboard_customize'), 'Actions (Policy Engine) & OS Events'),
           e('div', { className: 'row' },
-            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD') }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
-            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER') }, Icon('sync_alt'), 'Virement (Bloqué)'),
+            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD'), disabled: !verified, style: { opacity: verified ? 1 : 0.5 } }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
+            e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER'), disabled: !verified, style: { opacity: verified ? 1 : 0.5 } }, Icon('sync_alt'), 'Virement (Bloqué)'),
             e('div', { style: { display: 'flex', gap: '0.75rem', marginLeft: 'auto' } },
               e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler AnyDesk'),
               e('button', { className: `control-btn ${isRecording ? 'primary' : 'warning'}`, onClick: simulateRecording }, Icon(isRecording ? 'videocam_off' : 'videocam'), isRecording ? 'Arrêter Enreg.' : 'Simuler Enregistrement')
