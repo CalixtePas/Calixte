@@ -25,7 +25,7 @@ const OS_APPS = [
 
 function App() {
   const [deviceView, setDeviceView] = useState('OS_HOME'); 
-  const [isAppUnlocked, setIsAppUnlocked] = useState(false); // NOUVEAU : État de verrouillage de l'app
+  const [isAppUnlocked, setIsAppUnlocked] = useState(false);
   const [adminTab, setAdminTab] = useState('CRM');
   const [currentTime, setCurrentTime] = useState('');
   
@@ -79,13 +79,8 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-  }, [apiLogs, adminTab]);
-
-  useEffect(() => {
-    if (auditRef.current) auditRef.current.scrollTop = auditRef.current.scrollHeight;
-  }, [actionLog, adminTab]);
+  useEffect(() => { if (terminalRef.current) terminalRef.current.scrollTop = terminalRef.current.scrollHeight; }, [apiLogs, adminTab]);
+  useEffect(() => { if (auditRef.current) auditRef.current.scrollTop = auditRef.current.scrollHeight; }, [actionLog, adminTab]);
 
   const logAction = (msg, type = 'info') => setActionLog(prev => [...prev, {msg, type, t: new Date().toLocaleTimeString()}].slice(-50));
   const showToast = (msg) => { const id = Date.now(); setToasts(prev => [...prev, { id, msg }]); setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000); };
@@ -102,7 +97,7 @@ function App() {
   // --- ACTIONS CRM ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
-    logAction(`Appel téléphonique sortant vers le client...`);
+    logAction(`Initialisation du handshake cryptographique...`);
     
     try {
       const startReq = { actor_type: actorType, intent: 'FRAUD_CALLBACK', audience_ref: 'app-mobile-user' };
@@ -122,12 +117,16 @@ function App() {
     
     setIncomingCallParams(null);
     setIsPhoneCallActive(true);
-    logAction(`📞 Le client a décroché. Vérification Castor...`, 'info');
+    logAction(`📞 Le client a décroché. Réception du JWT Castor...`, 'info');
 
     try {
       setToken(dataStart.token);
+      logApiPayload('in', 'JWT Payload Received', { token: dataStart.token.substring(0, 40) + "..." });
+      
       const jwksRes = await fetch(`${API}/jwks`);
       const jwks = await jwksRes.json();
+      logAction(`🔐 Récupération de la clé publique EdDSA (JWKS)...`);
+      
       const key = await importJWK(jwks.keys[0], 'EdDSA');
       const result = await jwtVerify(dataStart.token, key, { issuer: 'castor' });
       
@@ -135,15 +134,14 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      setDeviceView('APP');
-      setHasPushNotif(false);
-      
-      // Si l'app est déjà déverrouillée, on montre la popup direct, sinon elle s'affichera après le FaceID de l'app.
-      if (isAppUnlocked) {
-          setShowPermissionsPopup(true);
+      // GESTION DU BACKGROUND : On ne force plus l'ouverture de l'app.
+      if (deviceView === 'OS_HOME') {
+        setHasPushNotif(true);
+      } else {
+        if (isAppUnlocked) setShowPermissionsPopup(true);
       }
       
-      logAction(`✅ Preuve cryptographique valide. Canal sécurisé activé.`, 'success');
+      logAction(`✅ Signature vérifiée. Canal matériel sécurisé.`, 'success');
 
       if (esRef.current) esRef.current.close();
       const es = new EventSource(`${API}/interactions/${id}/stream`);
@@ -170,7 +168,7 @@ function App() {
         }
       };
       esRef.current = es;
-    } catch (err) { setVerified(null); logAction('❌ Échec cryptographique.', 'err'); }
+    } catch (err) { setVerified(null); logAction('❌ Signature invalide ou corrompue.', 'err'); }
   }
 
   function declineCall() {
@@ -215,7 +213,7 @@ function App() {
       logApiPayload('out', `POST /confirmations/${pendingConfirmation}/approve`, {});
       try {
         await fetch(`${API}/confirmations/${pendingConfirmation}/approve`, { method: 'POST' });
-        setPendingConfirmation(''); logAction('✅ Validation FaceID réussie.', 'success'); showToast("Action confirmée.");
+        setPendingConfirmation(''); logAction('✅ Action serveur validée par biométrie.', 'success'); showToast("Action confirmée.");
         if (pendingActionName === 'FREEZE_CARD') setIsCardFrozen(true);
       } catch (err) { showToast("Erreur de validation."); }
     });
@@ -225,7 +223,7 @@ function App() {
     executeFaceIdScan(() => {
       if (localFaceIdAction === 'APP_LOGIN') {
           setIsAppUnlocked(true);
-          if (verified) setShowPermissionsPopup(true); // Affiche l'alerte d'appel si on ouvre l'app pendant un appel Castor
+          if (verified) setShowPermissionsPopup(true); 
       } else if (localFaceIdAction === 'REPORT_LOST') {
         setIsCardCanceled(true); setIsCardFrozen(true); showToast("Carte en opposition définitive."); setActivePage('HOME');
       } else if (localFaceIdAction === 'FREEZE_CARD') {
@@ -256,15 +254,17 @@ function App() {
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
     }
 
+    // SI EN APPEL SÉCURISÉ (Le Honeypot & Le Liability Shift)
     if (verified === true) {
-      if (actionName === 'WIRE_TRANSFER' && isNewBen) {
-          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne.\n\nC'est la méthode n°1 des fraudeurs. RACCROCHEZ.`);
+      // HONEYPOT OTP : L'utilisateur clique, le piège se referme sur le fraudeur.
+      if (actionName === 'ASK_OTP') {
+          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. S'il vous le demande, c'est un fraudeur.\n\nRACCROCHEZ IMMÉDIATEMENT.`);
           return;
       }
         
-      if (summary.cannot.includes(actionName) && actionName !== 'WIRE_TRANSFER') { 
-          setScamAlert(`ATTENTION\n\nL'appelant tente de vous faire exécuter une action interdite. Raccrochez.`); 
-          return; 
+      if (actionName === 'WIRE_TRANSFER' && isNewBen) {
+          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne. C'est la méthode n°1 des fraudeurs.\n\nRACCROCHEZ.`);
+          return;
       }
       
       if (actionName === 'WIRE_TRANSFER') { 
@@ -285,6 +285,7 @@ function App() {
       return;
     }
 
+    // SI HORS APPEL
     let specificWarning = "";
     if (actionName === 'WIRE_TRANSFER') {
         specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de faire un virement.\n\n";
@@ -299,7 +300,7 @@ function App() {
         onConfirm: () => {
             setCustomPrompt(null);
             if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
-            setLocalFaceIdAction(actionName); 
+            setLocalFaceIdAction(actionName);
         }
     });
   }
@@ -307,7 +308,6 @@ function App() {
   function openAppFromHome() {
     setDeviceView('APP');
     setHasPushNotif(false);
-    // Au lieu de montrer directement les comptes ou la popup, on demande Face ID pour ouvrir l'app
     if (!isAppUnlocked) {
         setLocalFaceIdAction('APP_LOGIN');
     } else if (verified) {
@@ -318,7 +318,7 @@ function App() {
   function quitApp() {
       setDeviceView('OS_HOME');
       setActivePage('HOME');
-      setIsAppUnlocked(false); // On verrouille l'app quand on la quitte
+      setIsAppUnlocked(false); 
   }
 
   function exportAuditReport() {
@@ -385,7 +385,6 @@ function App() {
             e('p', null, isRecording ? 'Pour votre sécurité, CastorBank a bloqué l\'enregistrement vidéo de vos données sensibles.' : 'Pour votre sécurité, CastorBank a masqué vos données. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
           ),
 
-          // VUE : SPLASH SCREEN VERROUILLÉ
           !isAppUnlocked && e('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' } },
               e('div', { style: { color: 'var(--primary)', fontSize: '4rem', marginBottom: '1rem' } }, Icon('account_balance')),
               e('h2', { style: { margin: 0, color: '#111' } }, 'CastorBank'),
@@ -393,7 +392,6 @@ function App() {
               e('button', { className: 'btn-primary', style: { width: '80%', padding: '1rem 2rem' }, onClick: () => setLocalFaceIdAction('APP_LOGIN') }, Icon('face'), 'Déverrouiller avec Face ID')
           ),
 
-          // VUE : APPLICATION DÉVERROUILLÉE
           isAppUnlocked && e(React.Fragment, null, 
             e('div', { className: 'mobile-header' }, 
               e('div', { style: {display: 'flex', alignItems: 'center', gap:'0.5rem', cursor: 'pointer', color: '#666', fontSize:'0.85rem'}, onClick: quitApp }, Icon('arrow_back_ios'), 'Quitter'),
@@ -420,6 +418,7 @@ function App() {
                 e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
                 e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
                 e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
+                // Le bouton OTP reste visuellement normal (HONEYPOT)
                 e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
               ),
               
@@ -552,7 +551,11 @@ function App() {
         e('div', { className: 'admin-card', style: { borderTop: '4px solid var(--primary)' } },
           e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
             e('div', null, e('h3', { style: { margin: '0 0 0.25rem 0', borderBottom: 'none', padding: 0 } }, 'Alexandre Dupont'), e('p', { style: { margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' } }, 'ID : 09843-AX | Seg: Particulier')),
-            e('div', { className: `crm-status-badge ${verified ? 'secure' : 'idle'}` }, Icon(verified ? 'lock' : 'lock_open'), verified ? 'Authentifié' : 'Non authentifié')
+            e('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' } },
+              e('div', { className: `crm-status-badge ${verified ? 'secure' : 'idle'}` }, Icon(verified ? 'lock' : 'lock_open'), verified ? 'Canal Chiffré' : 'Non authentifié'),
+              // LE HEARTBEAT DE L'APPLICATION
+              verified && e('div', { className: `crm-status-badge ${deviceView === 'APP' ? 'active' : 'idle'}` }, Icon('smartphone'), deviceView === 'APP' ? 'App ouverte (Bannière)' : 'App en arrière-plan')
+            )
           ),
           e('div', { className: 'row', style: { marginTop: '1.5rem', borderTop: '1px solid #eee', paddingTop: '1rem' } },
             !isPhoneCallActive && !incomingCallParams && e('button', { className: 'control-btn primary', onClick: () => simulateIncomingCall('HUMAN_AGENT'), disabled: busy }, Icon('call'), 'Appeler (Humain)'),
@@ -606,6 +609,7 @@ function App() {
         e('h3', { style: { margin: 0, fontSize: '1.1rem' } }, 'Flux API & Preuves Cryptographiques'),
         e('p', { style: { fontSize: '0.85rem', color: '#666', marginTop: 0 } }, 'Visualisez les payloads réels traités par le moteur Castor en temps réel.'),
         e('div', { className: 'api-terminal', ref: terminalRef },
+          e('div', {style:{color:'var(--success)', marginBottom:'1rem'}}, "// CASTORSYSTEMS - HANDSHAKE ANALYZER v1.0"),
           apiLogs.length === 0 && e('div', null, '// En attente de requêtes API...'),
           apiLogs.map((log, i) => e('div', { key: i, className: 'api-log-entry' },
             e('div', { className: 'api-log-time' }, log.t),
