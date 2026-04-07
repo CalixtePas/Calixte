@@ -69,6 +69,8 @@ function App() {
   const [scanState, setScanState] = useState('idle');
   const [customPrompt, setCustomPrompt] = useState(null); 
 
+  const [consortiumAlert, setConsortiumAlert] = useState(false);
+
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Service Client');
 
@@ -134,7 +136,6 @@ function App() {
       const id = String(result.payload.sub);
       setInteractionId(id);
       
-      // GESTION DU BACKGROUND
       if (deviceView === 'OS_HOME') {
         setHasPushNotif(true);
       } else {
@@ -200,6 +201,17 @@ function App() {
     else logAction(`Arrêt de l'enregistrement vidéo.`, 'info');
   }
 
+  function toggleConsortiumAlert() {
+    const newState = !consortiumAlert;
+    setConsortiumAlert(newState);
+    if (newState) {
+        logAction(`🚨 INFO CONSORTIUM : Device Fingerprint flaggé frauduleux il y a 2 minutes.`, 'err');
+        showToast("Signalement inter-bancaire reçu.");
+    } else {
+        logAction(`ℹ️ INFO CONSORTIUM : Appareil blanchi.`, 'success');
+    }
+  }
+
   function executeFaceIdScan(onSuccess) {
     setScanState('scanning'); setBusy(true);
     setTimeout(() => {
@@ -235,6 +247,7 @@ function App() {
         setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
         setActivePage('HOME'); 
         showToast(`Virement de ${pendingActionData.amount.toFixed(2)} € validé.`);
+        logAction(`⚖️ LIABILITY SHIFT: Client a forcé un virement de ${pendingActionData.amount}€ malgré l'alerte.`, 'warn');
       } else if (localFaceIdAction === 'ASK_OTP') {
         showToast("Code OTP sécurisé : 849 201");
       } else if (localFaceIdAction === 'DISCUSS_CASE') {
@@ -267,8 +280,8 @@ function App() {
       
       if (actionName === 'WIRE_TRANSFER') { 
           setCustomPrompt({
-              title: '⚠️ AVERTISSEMENT CRITIQUE ⚠️',
-              message: `Vous êtes actuellement au téléphone.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement ou demander un paiement.\n\nSi la personne au bout du fil vous demande de le faire, c'est une fraude. Raccrochez et signalez l'appel.\n\nVoulez-vous forcer ce virement sous votre propre responsabilité ?`,
+              title: '⚠️ TRANSACTION GUARD ⚠️',
+              message: `Un conseiller n'a PAS le droit de vous faire exécuter un virement.\n\nSi la personne au téléphone vous le demande, il s'agit d'une tentative d'escroquerie.\n\nVoulez-vous engager votre responsabilité légale et forcer ce virement ?`,
               isDanger: true,
               onConfirm: () => {
                   setCustomPrompt(null);
@@ -289,11 +302,15 @@ function App() {
     } else if (actionName === 'ASK_OTP') {
         specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de lui dicter un code OTP.\n\n";
     }
+    
+    if (consortiumAlert) {
+        specificWarning = "🔴 DANGER : Notre réseau Castor a détecté que cet appareil a été récemment impliqué dans une fraude sur une autre application bancaire.\n\n" + specificWarning;
+    }
 
     setCustomPrompt({
-        title: 'SÉCURITÉ PASSIVE',
+        title: consortiumAlert ? 'ALERTE RÉSEAU CASTOR' : 'SÉCURITÉ PASSIVE',
         message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\n${specificWarning}Êtes-vous sûr de vouloir continuer cette action sensible ?`,
-        isDanger: false,
+        isDanger: consortiumAlert,
         onConfirm: () => {
             setCustomPrompt(null);
             if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
@@ -319,15 +336,24 @@ function App() {
   }
 
   function exportAuditReport() {
+    // ZERO-PII Evidence-Grade Audit Log
     const report = {
-      compliance_id: `AUDIT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`, timestamp: new Date().toISOString(),
-      session: { interaction_id: interactionId || 'NO_SESSION', is_verified: verified || false, actor: actorName },
-      audit_trail: actionLog, cryptographic_payloads: apiLogs
+      evidence_id: `EV-TRL-${Math.random().toString(36).substr(2, 9).toUpperCase()}`, 
+      timestamp: new Date().toISOString(),
+      policy: "ZERO-PII_STRICT",
+      session_context: { 
+          interaction_id: interactionId || 'NO_SESSION_ACTIVE', 
+          is_cryptographically_verified: verified || false, 
+          device_fingerprint: "DEV-849X-A7" // Anonymisé pour le RGPD
+      },
+      device_intel: { consortium_flagged: consortiumAlert },
+      evidence_trail: actionLog.map(log => ({ time: log.t, event: log.msg, severity: log.type })), 
+      cryptographic_payloads: apiLogs
     };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `castor_compliance_${report.compliance_id}.json`; a.click();
-    logAction("📄 Rapport d'Audit de Conformité généré.", "success");
+    const a = document.createElement('a'); a.href = url; a.download = `castor_evidence_${report.evidence_id}.json`; a.click();
+    logAction("📄 Evidence-Grade Audit Trail exporté avec succès.", "success");
   }
 
   let faceIdMessage = "Autoriser l'action ?";
@@ -365,7 +391,7 @@ function App() {
           
           hasPushNotif && e('div', { className: 'os-push', onClick: openAppFromHome },
             e('div', { className: 'icon-box' }, Icon('shield_person')),
-            e('div', { className: 'os-push-content' }, e('h4', null, 'CastorBank'), e('p', null, `Appel téléphonique sécurisé. Touchez pour ouvrir.`))
+            e('div', { className: 'os-push-content' }, e('h4', null, 'CastorBank'), e('p', null, `Ouvrez l'app pour sécuriser l'appel avec votre conseiller.`))
           ),
 
           e('div', { className: 'app-grid' },
@@ -398,6 +424,10 @@ function App() {
             verified === true && e('div', { className: 'call-banner verified' }, 
               e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('lock'), `Appel : ${actorName}`),
               e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
+            ),
+
+            consortiumAlert && !verified && e('div', { className: 'call-banner', style: { backgroundColor: '#ff9800', color: '#000', fontSize: '0.8rem', padding: '0.75rem' } }, 
+              e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('radar'), `Réseau Castor : Activité frauduleuse suspectée sur ce téléphone.`)
             ),
 
             e('div', { className: 'mobile-content' },
@@ -561,20 +591,23 @@ function App() {
 
         e('div', { className: 'admin-card' },
           e('h3', null, Icon('dashboard_customize'), 'Actions (Policy Engine) & OS Events'),
-          e('div', { className: 'row' },
+          e('div', { className: 'row', style: { marginBottom: '1rem' } },
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('FREEZE_CARD'), disabled: !verified, style: { opacity: verified ? 1 : 0.5 } }, Icon('ac_unit'), 'Geler Carte (Step-Up)'),
             e('button', { className: 'control-btn', onClick: () => simulateCallerAction('WIRE_TRANSFER'), disabled: !verified, style: { opacity: verified ? 1 : 0.5 } }, Icon('sync_alt'), 'Virement (Bloqué)'),
             e('div', { style: { display: 'flex', gap: '0.75rem', marginLeft: 'auto' } },
               e('button', { className: `control-btn ${isScreenShared ? 'primary' : 'warning'}`, onClick: simulateScreenShare }, Icon(isScreenShared ? 'visibility' : 'visibility_off'), isScreenShared ? 'Arrêter AnyDesk' : 'Simuler AnyDesk'),
               e('button', { className: `control-btn ${isRecording ? 'primary' : 'warning'}`, onClick: simulateRecording }, Icon(isRecording ? 'videocam_off' : 'videocam'), isRecording ? 'Arrêter Enreg.' : 'Simuler Enregistrement')
             )
+          ),
+          e('div', { className: 'row', style: { borderTop: '1px solid #eee', paddingTop: '1rem' } },
+            e('button', { className: `control-btn ${consortiumAlert ? 'danger' : 'warning'}`, onClick: toggleConsortiumAlert, style: { width: '100%', justifyContent: 'center'} }, Icon('radar'), consortiumAlert ? "Retirer l'Alerte Consortium" : "Simuler Alerte Consortium (Cross-Bank)")
           )
         ),
 
         e('div', { className: 'admin-card', style: { flex: 1, display: 'flex', flexDirection: 'column' } },
           e('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center'} },
-            e('h3', {style: {border: 'none', padding: 0, margin: 0}}, Icon('history'), 'Piste d\'audit'),
-            e('button', { className: 'control-btn success', onClick: exportAuditReport }, Icon('download'), 'Export Conformité JSON')
+            e('h3', {style: {border: 'none', padding: 0, margin: 0}}, Icon('history'), 'Evidence-Grade Audit Trail'),
+            e('button', { className: 'control-btn success', onClick: exportAuditReport }, Icon('download'), 'Export Log (Zero-PII)')
           ),
           e('div', { className: 'logs', ref: auditRef },
             actionLog.length === 0 && e('div', null, '> En attente...'),
