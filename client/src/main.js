@@ -70,6 +70,10 @@ function App() {
   const [customPrompt, setCustomPrompt] = useState(null); 
 
   const [consortiumAlert, setConsortiumAlert] = useState(false);
+  
+  // NOUVEAUTÉ : Simulation d'un appel réseau classique (fraudeur)
+  const [externalGsmCallActive, setExternalGsmCallActive] = useState(false);
+  const [isTelcoChecking, setIsTelcoChecking] = useState(false);
 
   const summary = useMemo(() => payload?.summary ?? { can: [], cannot: [] }, [payload]);
   const actorName = payload?.actor_type === 'AI_AGENT' ? 'Agent IA' : (incomingCallParams?.actorType === 'AI_AGENT' ? 'Agent IA' : 'Service Client');
@@ -94,9 +98,9 @@ function App() {
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
     setIncomingCallParams(null); setIsPhoneCallActive(false); setIsScreenShared(false); setIsRecording(false);
     setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setPendingActionData(null); setScanState('idle'); setCustomPrompt(null);
+    setIsTelcoChecking(false);
   }
 
-  // --- ACTIONS CRM ---
   async function simulateIncomingCall(actorType) {
     setBusy(true); resetState();
     logAction(`Initialisation du handshake cryptographique...`);
@@ -267,17 +271,57 @@ function App() {
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
     }
 
+    // NOUVEAUTÉ : Telco Ping (Simulation)
+    if (actionName === 'WIRE_TRANSFER' || actionName === 'ASK_OTP') {
+        setIsTelcoChecking(true);
+        logApiPayload('out', 'GET /telco/v1/call-status?msisdn=user', { request: 'Check GSMA Open Gateway for active call' });
+        
+        setTimeout(() => {
+            setIsTelcoChecking(false);
+            
+            if (externalGsmCallActive) {
+                logApiPayload('in', '200 OK (Telco Response)', { active_call: true, network: 'Orange FR' });
+                logAction(`📡 TELCO API: Appel GSM suspect détecté en arrière-plan.`, 'warn');
+                
+                if (actionName === 'ASK_OTP') {
+                    setScamAlert(`ALERTE FRAUDE (DÉTECTION RÉSEAU)\n\nNotre système détecte que vous êtes actuellement au téléphone.\n\nUn conseiller n'a JAMAIS besoin d'un code OTP par téléphone. RACCROCHEZ.`);
+                    return;
+                }
+                
+                if (actionName === 'WIRE_TRANSFER') {
+                    setCustomPrompt({
+                        title: '⚠️ INTERCEPTION RÉSEAU ⚠️',
+                        message: `Notre système télécom détecte un appel vocal en cours sur votre ligne.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement au téléphone. Si on vous le demande, c'est une fraude.\n\nVoulez-vous engager votre responsabilité légale et forcer ce virement ?`,
+                        isDanger: true,
+                        onConfirm: () => {
+                            setCustomPrompt(null);
+                            setPendingActionData({ amount: finalAmount });
+                            setLocalFaceIdAction(actionName); 
+                        }
+                    });
+                    return;
+                }
+            } else {
+                 logApiPayload('in', '200 OK (Telco Response)', { active_call: false });
+                 proceedWithNormalActionFlow(actionName, finalAmount, isNewBen);
+            }
+        }, 800);
+        return;
+    }
+    
+    proceedWithNormalActionFlow(actionName, finalAmount, isNewBen);
+  }
+
+  function proceedWithNormalActionFlow(actionName, finalAmount, isNewBen) {
     if (verified === true) {
       if (actionName === 'ASK_OTP') {
           setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. S'il vous le demande, c'est un fraudeur.\n\nRACCROCHEZ IMMÉDIATEMENT.`);
           return;
       }
-        
       if (actionName === 'WIRE_TRANSFER' && isNewBen) {
           setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne. C'est la méthode n°1 des fraudeurs.\n\nRACCROCHEZ.`);
           return;
       }
-      
       if (actionName === 'WIRE_TRANSFER') { 
           setCustomPrompt({
               title: '⚠️ TRANSACTION GUARD ⚠️',
@@ -291,7 +335,6 @@ function App() {
           });
           return;
       }
-      
       setLocalFaceIdAction(actionName);
       return;
     }
@@ -336,7 +379,6 @@ function App() {
   }
 
   function exportAuditReport() {
-    // ZERO-PII Evidence-Grade Audit Log
     const report = {
       evidence_id: `EV-TRL-${Math.random().toString(36).substr(2, 9).toUpperCase()}`, 
       timestamp: new Date().toISOString(),
@@ -344,9 +386,9 @@ function App() {
       session_context: { 
           interaction_id: interactionId || 'NO_SESSION_ACTIVE', 
           is_cryptographically_verified: verified || false, 
-          device_fingerprint: "DEV-849X-A7" // Anonymisé pour le RGPD
+          device_fingerprint: "DEV-849X-A7"
       },
-      device_intel: { consortium_flagged: consortiumAlert },
+      device_intel: { consortium_flagged: consortiumAlert, telco_call_active: externalGsmCallActive },
       evidence_trail: actionLog.map(log => ({ time: log.t, event: log.msg, severity: log.type })), 
       cryptographic_payloads: apiLogs
     };
@@ -386,8 +428,8 @@ function App() {
         ),
 
         deviceView === 'OS_HOME' && e('div', { className: 'phone-home' },
-          isPhoneCallActive && e('div', { className: 'active-call-pill' }, Icon('call'), '00:12'),
-          e('div', { className: 'os-clock', style: { marginTop: isPhoneCallActive ? '2rem' : '0'} }, currentTime),
+          (isPhoneCallActive || externalGsmCallActive) && e('div', { className: `active-call-pill ${externalGsmCallActive ? 'danger' : ''}` }, Icon('call'), externalGsmCallActive ? 'Appel Externe' : '00:12'),
+          e('div', { className: 'os-clock', style: { marginTop: (isPhoneCallActive || externalGsmCallActive) ? '2rem' : '0'} }, currentTime),
           
           hasPushNotif && e('div', { className: 'os-push', onClick: openAppFromHome },
             e('div', { className: 'icon-box' }, Icon('shield_person')),
@@ -406,6 +448,12 @@ function App() {
             e('div', { className: 'icon' }, Icon(isRecording ? 'videocam' : 'visibility_off')),
             e('h3', null, isRecording ? 'Enregistrement d\'écran détecté' : 'Écran partagé détecté'),
             e('p', null, isRecording ? 'Pour votre sécurité, CastorBank a bloqué l\'enregistrement vidéo de vos données sensibles.' : 'Pour votre sécurité, CastorBank a masqué vos données. Aucun conseiller ne vous demandera d\'installer AnyDesk.')
+          ),
+
+          isTelcoChecking && e('div', { className: 'privacy-screen', style: { background: 'rgba(0,0,0,0.8)' } },
+            e('div', { className: 'icon', style: { animation: 'pulse 1s infinite'} }, Icon('network_check')),
+            e('h3', {style: {color: 'white'}}, 'Vérification Telco...'),
+            e('p', {style: {color: '#aaa'}}, 'Contrôle GSMA Open Gateway en cours')
           ),
 
           !isAppUnlocked && e('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' } },
@@ -599,8 +647,9 @@ function App() {
               e('button', { className: `control-btn ${isRecording ? 'primary' : 'warning'}`, onClick: simulateRecording }, Icon(isRecording ? 'videocam_off' : 'videocam'), isRecording ? 'Arrêter Enreg.' : 'Simuler Enregistrement')
             )
           ),
-          e('div', { className: 'row', style: { borderTop: '1px solid #eee', paddingTop: '1rem' } },
-            e('button', { className: `control-btn ${consortiumAlert ? 'danger' : 'warning'}`, onClick: toggleConsortiumAlert, style: { width: '100%', justifyContent: 'center'} }, Icon('radar'), consortiumAlert ? "Retirer l'Alerte Consortium" : "Simuler Alerte Consortium (Cross-Bank)")
+          e('div', { className: 'row', style: { borderTop: '1px solid #eee', paddingTop: '1rem', flexWrap: 'wrap', gap: '0.5rem' } },
+            e('button', { className: `control-btn ${consortiumAlert ? 'danger' : 'warning'}`, onClick: toggleConsortiumAlert, style: { flex: 1, justifyContent: 'center'} }, Icon('radar'), consortiumAlert ? "Retirer l'Alerte Consortium" : "Simuler Alerte Consortium"),
+            e('button', { className: `control-btn ${externalGsmCallActive ? 'danger' : 'warning'}`, onClick: () => setExternalGsmCallActive(!externalGsmCallActive), style: { flex: 1, justifyContent: 'center'} }, Icon('cell_tower'), externalGsmCallActive ? "Raccrocher GSM Fraudeur" : "Simuler Appel GSM Externe (Telco API)")
           )
         ),
 
