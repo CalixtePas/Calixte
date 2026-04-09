@@ -70,8 +70,6 @@ function App() {
   const [customPrompt, setCustomPrompt] = useState(null); 
 
   const [consortiumAlert, setConsortiumAlert] = useState(false);
-  
-  // NOUVEAUTÉ : Simulation d'un appel réseau classique (fraudeur)
   const [externalGsmCallActive, setExternalGsmCallActive] = useState(false);
   const [isTelcoChecking, setIsTelcoChecking] = useState(false);
 
@@ -251,7 +249,8 @@ function App() {
         setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
         setActivePage('HOME'); 
         showToast(`Virement de ${pendingActionData.amount.toFixed(2)} € validé.`);
-        logAction(`⚖️ LIABILITY SHIFT: Client a forcé un virement de ${pendingActionData.amount}€ malgré l'alerte.`, 'warn');
+        // Le log backend constate le bypass conscient du client (Le vrai Liability Shift)
+        logAction(`⚖️ COMPLIANCE: Client a confirmé explicitement son virement malgré les avertissements de fraude.`, 'warn');
       } else if (localFaceIdAction === 'ASK_OTP') {
         showToast("Code OTP sécurisé : 849 201");
       } else if (localFaceIdAction === 'DISCUSS_CASE') {
@@ -271,7 +270,6 @@ function App() {
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
     }
 
-    // NOUVEAUTÉ : Telco Ping (Simulation)
     if (actionName === 'WIRE_TRANSFER' || actionName === 'ASK_OTP') {
         setIsTelcoChecking(true);
         logApiPayload('out', 'GET /telco/v1/call-status?msisdn=user', { request: 'Check GSMA Open Gateway for active call' });
@@ -279,19 +277,20 @@ function App() {
         setTimeout(() => {
             setIsTelcoChecking(false);
             
-            if (externalGsmCallActive) {
+            if (externalGsmCallActive && !verified) {
                 logApiPayload('in', '200 OK (Telco Response)', { active_call: true, network: 'Orange FR' });
                 logAction(`📡 TELCO API: Appel GSM suspect détecté en arrière-plan.`, 'warn');
                 
                 if (actionName === 'ASK_OTP') {
-                    setScamAlert(`ALERTE FRAUDE (DÉTECTION RÉSEAU)\n\nNotre système détecte que vous êtes actuellement au téléphone.\n\nUn conseiller n'a JAMAIS besoin d'un code OTP par téléphone. RACCROCHEZ.`);
+                    setScamAlert(`ALERTE DE SÉCURITÉ\n\nNotre système détecte que vous êtes au téléphone.\n\nUn conseiller bancaire ne vous demandera JAMAIS un code OTP par téléphone. Raccrochez immédiatement, c'est une fraude.`);
                     return;
                 }
                 
                 if (actionName === 'WIRE_TRANSFER') {
+                    // TEXTE CORRIGÉ : On ne parle plus de "responsabilité légale", mais de confirmation forte.
                     setCustomPrompt({
-                        title: '⚠️ INTERCEPTION RÉSEAU ⚠️',
-                        message: `Notre système télécom détecte un appel vocal en cours sur votre ligne.\n\nUn conseiller n'a PAS le droit de vous faire faire un virement au téléphone. Si on vous le demande, c'est une fraude.\n\nVoulez-vous engager votre responsabilité légale et forcer ce virement ?`,
+                        title: '⚠️ APPEL EN COURS DÉTECTÉ ⚠️',
+                        message: `Notre système détecte que vous êtes actuellement en communication téléphonique.\n\nRAPPEL : Ne faites JAMAIS de virement à la demande d'un interlocuteur (même s'il se dit de la banque ou de la police).\n\nEn continuant, vous confirmez que personne ne vous demande d'effectuer cette opération au téléphone.`,
                         isDanger: true,
                         onConfirm: () => {
                             setCustomPrompt(null);
@@ -315,17 +314,18 @@ function App() {
   function proceedWithNormalActionFlow(actionName, finalAmount, isNewBen) {
     if (verified === true) {
       if (actionName === 'ASK_OTP') {
-          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. S'il vous le demande, c'est un fraudeur.\n\nRACCROCHEZ IMMÉDIATEMENT.`);
+          setScamAlert(`ALERTE FRAUDE\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. S'il vous le demande, c'est un fraudeur.\n\nRACCROCHEZ IMMÉDIATEMENT.`);
           return;
       }
       if (actionName === 'WIRE_TRANSFER' && isNewBen) {
-          setScamAlert(`ALERTE FRAUDE (MODE OPÉRATOIRE DÉTECTÉ)\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne. C'est la méthode n°1 des fraudeurs.\n\nRACCROCHEZ.`);
+          setScamAlert(`ALERTE FRAUDE\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne. C'est la méthode n°1 des fraudeurs.\n\nRACCROCHEZ.`);
           return;
       }
       if (actionName === 'WIRE_TRANSFER') { 
+          // TEXTE CORRIGÉ : Déclaration d'intention explicite.
           setCustomPrompt({
-              title: '⚠️ TRANSACTION GUARD ⚠️',
-              message: `Un conseiller n'a PAS le droit de vous faire exécuter un virement.\n\nSi la personne au téléphone vous le demande, il s'agit d'une tentative d'escroquerie.\n\nVoulez-vous engager votre responsabilité légale et forcer ce virement ?`,
+              title: '⚠️ TRANSACTION SOUS HAUTE SÉCURITÉ ⚠️',
+              message: `Un conseiller n'a PAS le droit de vous demander d'exécuter un virement.\n\nSi votre interlocuteur actuel vous le demande, raccrochez, c'est une fraude.\n\nPour continuer, vous devez confirmer être le seul à l'initiative de ce virement.`,
               isDanger: true,
               onConfirm: () => {
                   setCustomPrompt(null);
@@ -347,12 +347,12 @@ function App() {
     }
     
     if (consortiumAlert) {
-        specificWarning = "🔴 DANGER : Notre réseau Castor a détecté que cet appareil a été récemment impliqué dans une fraude sur une autre application bancaire.\n\n" + specificWarning;
+        specificWarning = "🔴 DANGER : Notre réseau de sécurité a détecté une activité suspecte récente concernant votre appareil.\n\n" + specificWarning;
     }
 
     setCustomPrompt({
-        title: consortiumAlert ? 'ALERTE RÉSEAU CASTOR' : 'SÉCURITÉ PASSIVE',
-        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\n${specificWarning}Êtes-vous sûr de vouloir continuer cette action sensible ?`,
+        title: consortiumAlert ? 'ALERTE RÉSEAU CASTOR' : 'VÉRIFICATION DE SÉCURITÉ',
+        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\n${specificWarning}Êtes-vous sûr de vouloir continuer ?`,
         isDanger: consortiumAlert,
         onConfirm: () => {
             setCustomPrompt(null);
@@ -398,13 +398,14 @@ function App() {
     logAction("📄 Evidence-Grade Audit Trail exporté avec succès.", "success");
   }
 
+  // TEXTE CORRIGÉ : On adapte aussi le message de FaceID pour que ça matche.
   let faceIdMessage = "Autoriser l'action ?";
   if (pendingConfirmation) faceIdMessage = `Le serveur demande de valider l'action : ${pendingActionName}`;
   else if (localFaceIdAction === 'APP_LOGIN') faceIdMessage = "Ouvrir CastorBank";
   else if (localFaceIdAction === 'REPORT_LOST') faceIdMessage = "Confirmer l'opposition définitive ?";
   else if (localFaceIdAction === 'FREEZE_CARD') faceIdMessage = "Confirmer le blocage de la carte ?";
   else if (localFaceIdAction === 'UNFREEZE_CARD') faceIdMessage = "Confirmer le déblocage de la carte ?";
-  else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer le virement de ${pendingActionData.amount.toFixed(2)} € ?`;
+  else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer être à l'initiative de ce virement de ${pendingActionData.amount.toFixed(2)} € ?`;
   else if (localFaceIdAction === 'ASK_OTP') faceIdMessage = "Confirmer la génération d'un code OTP ?";
 
   return e('div', { className: 'demo-container' },
@@ -458,7 +459,7 @@ function App() {
 
           !isAppUnlocked && e('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' } },
               e('div', { style: { color: 'var(--primary)', fontSize: '4rem', marginBottom: '1rem' } }, Icon('account_balance')),
-              e('h2', { style: { margin: 0, color: '#111' } }, 'CastorBank'),
+              e('h2', { style: { margin: '0 0 0.5rem 0', color: '#111' } }, 'CastorBank'),
               e('p', { style: { color: '#666', fontSize: '0.9rem', marginBottom: '3rem' } }, 'Authentification requise'),
               e('button', { className: 'btn-primary', style: { width: '80%', padding: '1rem 2rem' }, onClick: () => setLocalFaceIdAction('APP_LOGIN') }, Icon('face'), 'Déverrouiller avec Face ID')
           ),
@@ -580,7 +581,7 @@ function App() {
             e('div', { className: 'modal' },
               e('h3', { className: 'modal-title', style: { color: customPrompt.isDanger ? 'var(--danger)' : 'var(--text)' } }, Icon(customPrompt.isDanger ? 'warning' : 'info'), customPrompt.title),
               e('p', { style: { color: 'var(--text-muted)', fontSize: '0.9rem', whiteSpace: 'pre-wrap', marginBottom: '1.5rem' } }, customPrompt.message),
-              e('button', { className: `modal-btn ${customPrompt.isDanger ? 'danger' : 'primary'}`, onClick: customPrompt.onConfirm }, 'Continuer'),
+              e('button', { className: `modal-btn ${customPrompt.isDanger ? 'danger' : 'primary'}`, onClick: customPrompt.onConfirm }, 'Confirmer'),
               e('button', { className: 'modal-btn secondary', onClick: () => setCustomPrompt(null) }, 'Annuler')
             )
           ),
