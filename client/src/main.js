@@ -214,6 +214,16 @@ function App() {
     }
   }
 
+  async function toggleExternalGsmCall() {
+    const newState = !externalGsmCallActive;
+    setExternalGsmCallActive(newState);
+    try {
+        await fetch(`${API}/admin/telco-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active_call: newState }) });
+    } catch (e) {
+        logAction("❌ Erreur de communication avec l'API Admin Telco", "err");
+    }
+  }
+
   function executeFaceIdScan(onSuccess) {
     setScanState('scanning'); setBusy(true);
     setTimeout(() => {
@@ -249,7 +259,6 @@ function App() {
         setTransferAmount(''); setNewBeneficiaryName(''); setNewBeneficiaryIban('');
         setActivePage('HOME'); 
         showToast(`Virement de ${pendingActionData.amount.toFixed(2)} € validé.`);
-        // Le log backend constate le bypass conscient du client (Le vrai Liability Shift)
         logAction(`⚖️ COMPLIANCE: Client a confirmé explicitement son virement malgré les avertissements de fraude.`, 'warn');
       } else if (localFaceIdAction === 'ASK_OTP') {
         showToast("Code OTP sécurisé : 849 201");
@@ -261,7 +270,7 @@ function App() {
     });
   }
 
-  function handleUserAction(actionName) {
+  async function handleUserAction(actionName) {
     let finalAmount = parseFloat(transferAmount);
     const isNewBen = transferRecipient === RECIPIENTS[0];
 
@@ -272,13 +281,15 @@ function App() {
 
     if (actionName === 'WIRE_TRANSFER' || actionName === 'ASK_OTP') {
         setIsTelcoChecking(true);
-        logApiPayload('out', 'GET /telco/v1/call-status?msisdn=user', { request: 'Check GSMA Open Gateway for active call' });
+        logApiPayload('out', 'GET /telco/call-status', { request: 'Check GSMA Open Gateway for active call' });
         
-        setTimeout(() => {
+        try {
+            const telcoRes = await fetch(`${API}/telco/call-status`);
+            const telcoData = await telcoRes.json();
             setIsTelcoChecking(false);
             
-            if (externalGsmCallActive && !verified) {
-                logApiPayload('in', '200 OK (Telco Response)', { active_call: true, network: 'Orange FR' });
+            if (telcoData.active_call && !verified) {
+                logApiPayload('in', '200 OK (Telco Response)', telcoData);
                 logAction(`📡 TELCO API: Appel GSM suspect détecté en arrière-plan.`, 'warn');
                 
                 if (actionName === 'ASK_OTP') {
@@ -287,7 +298,6 @@ function App() {
                 }
                 
                 if (actionName === 'WIRE_TRANSFER') {
-                    // TEXTE CORRIGÉ : On ne parle plus de "responsabilité légale", mais de confirmation forte.
                     setCustomPrompt({
                         title: '⚠️ APPEL EN COURS DÉTECTÉ ⚠️',
                         message: `Notre système détecte que vous êtes actuellement en communication téléphonique.\n\nRAPPEL : Ne faites JAMAIS de virement à la demande d'un interlocuteur (même s'il se dit de la banque ou de la police).\n\nEn continuant, vous confirmez que personne ne vous demande d'effectuer cette opération au téléphone.`,
@@ -301,10 +311,14 @@ function App() {
                     return;
                 }
             } else {
-                 logApiPayload('in', '200 OK (Telco Response)', { active_call: false });
+                 logApiPayload('in', '200 OK (Telco Response)', telcoData);
                  proceedWithNormalActionFlow(actionName, finalAmount, isNewBen);
             }
-        }, 800);
+        } catch (e) {
+            setIsTelcoChecking(false);
+            logAction("❌ Échec de la vérification Telco API", "err");
+            proceedWithNormalActionFlow(actionName, finalAmount, isNewBen);
+        }
         return;
     }
     
@@ -322,7 +336,6 @@ function App() {
           return;
       }
       if (actionName === 'WIRE_TRANSFER') { 
-          // TEXTE CORRIGÉ : Déclaration d'intention explicite.
           setCustomPrompt({
               title: '⚠️ TRANSACTION SOUS HAUTE SÉCURITÉ ⚠️',
               message: `Un conseiller n'a PAS le droit de vous demander d'exécuter un virement.\n\nSi votre interlocuteur actuel vous le demande, raccrochez, c'est une fraude.\n\nPour continuer, vous devez confirmer être le seul à l'initiative de ce virement.`,
@@ -398,7 +411,6 @@ function App() {
     logAction("📄 Evidence-Grade Audit Trail exporté avec succès.", "success");
   }
 
-  // TEXTE CORRIGÉ : On adapte aussi le message de FaceID pour que ça matche.
   let faceIdMessage = "Autoriser l'action ?";
   if (pendingConfirmation) faceIdMessage = `Le serveur demande de valider l'action : ${pendingActionName}`;
   else if (localFaceIdAction === 'APP_LOGIN') faceIdMessage = "Ouvrir CastorBank";
@@ -410,9 +422,6 @@ function App() {
 
   return e('div', { className: 'demo-container' },
     
-    // ===============================================
-    // APP MOBILE / TELEPHONE
-    // ===============================================
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
         
@@ -611,9 +620,6 @@ function App() {
       )
     ),
 
-    // ===============================================
-    // DROITE : PANNEAU D'ADMINISTRATION
-    // ===============================================
     e('div', { className: 'admin-panel' },
       
       e('div', { className: 'admin-tabs' },
@@ -650,7 +656,7 @@ function App() {
           ),
           e('div', { className: 'row', style: { borderTop: '1px solid #eee', paddingTop: '1rem', flexWrap: 'wrap', gap: '0.5rem' } },
             e('button', { className: `control-btn ${consortiumAlert ? 'danger' : 'warning'}`, onClick: toggleConsortiumAlert, style: { flex: 1, justifyContent: 'center'} }, Icon('radar'), consortiumAlert ? "Retirer l'Alerte Consortium" : "Simuler Alerte Consortium"),
-            e('button', { className: `control-btn ${externalGsmCallActive ? 'danger' : 'warning'}`, onClick: () => setExternalGsmCallActive(!externalGsmCallActive), style: { flex: 1, justifyContent: 'center'} }, Icon('cell_tower'), externalGsmCallActive ? "Raccrocher GSM Fraudeur" : "Simuler Appel GSM Externe (Telco API)")
+            e('button', { className: `control-btn ${externalGsmCallActive ? 'danger' : 'warning'}`, onClick: toggleExternalGsmCall, style: { flex: 1, justifyContent: 'center'} }, Icon('cell_tower'), externalGsmCallActive ? "Raccrocher GSM Fraudeur" : "Simuler Appel GSM Externe (Telco API)")
           )
         ),
 
