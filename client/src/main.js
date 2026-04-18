@@ -39,6 +39,7 @@ function App() {
   const [onlinePayments, setOnlinePayments] = useState(true);
   
   const [incomingCallParams, setIncomingCallParams] = useState(null); 
+  const [incomingExternalCall, setIncomingExternalCall] = useState(false); // NOUVEAU: Appel GSM entrant
   const [isPhoneCallActive, setIsPhoneCallActive] = useState(false);
   const [isScreenShared, setIsScreenShared] = useState(false);
   const [isRecording, setIsRecording] = useState(false); 
@@ -96,7 +97,7 @@ function App() {
     setScamAlert(''); setHasPushNotif(false); setShowPermissionsPopup(false);
     setIncomingCallParams(null); setIsPhoneCallActive(false); setIsScreenShared(false); setIsRecording(false);
     setPendingConfirmation(''); setPendingActionName(''); setLocalFaceIdAction(null); setPendingActionData(null); setScanState('idle'); setCustomPrompt(null);
-    setIsTelcoChecking(false);
+    setIsTelcoChecking(false); setIncomingExternalCall(false);
   }
 
   async function simulateIncomingCall(actorType) {
@@ -177,7 +178,7 @@ function App() {
   function declineCall() {
     setIncomingCallParams(null);
     resetState();
-    logAction(`📵 Le client a refusé l'appel.`, 'warn');
+    logAction(`📵 Le client a refusé l'appel Castor.`, 'warn');
   }
 
   async function simulateCallerAction(action) {
@@ -214,8 +215,8 @@ function App() {
     }
   }
 
-  async function toggleExternalGsmCall() {
-    const newState = !externalGsmCallActive;
+  // NOUVEAU : Fonction modifiée pour intégrer la simulation UI (décrocher/raccrocher GSM)
+  async function setExternalCallState(newState) {
     setExternalGsmCallActive(newState);
     try {
         await fetch(`${API}/admin/telco-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active_call: newState }) });
@@ -270,6 +271,7 @@ function App() {
     });
   }
 
+  // NOUVEAU : Logique de sécurité propre (Hard Block Consortium + Friction modérée Telco)
   async function handleUserAction(actionName) {
     let finalAmount = parseFloat(transferAmount);
     const isNewBen = transferRecipient === RECIPIENTS[0];
@@ -277,6 +279,12 @@ function App() {
     if (actionName === 'WIRE_TRANSFER') {
         if (isNaN(finalAmount) || finalAmount <= 0) return showToast("Veuillez saisir un montant valide.");
         if (isNewBen && (!newBeneficiaryName || !newBeneficiaryIban)) return showToast("Informations du bénéficiaire manquantes.");
+    }
+
+    // NOUVEAU : HARD BLOCK CONSORTIUM (Fini le bandeau jaune inutile)
+    if (consortiumAlert && !verified && (actionName === 'WIRE_TRANSFER' || actionName === 'ASK_OTP')) {
+        setScamAlert("Action bloquée par le Consortium Castor.\n\nCet appareil a été signalé dans une tentative de fraude récente sur le réseau inter-bancaire.\n\nLes opérations sensibles sont temporairement suspendues pour votre sécurité.");
+        return;
     }
 
     if (actionName === 'WIRE_TRANSFER' || actionName === 'ASK_OTP') {
@@ -290,18 +298,27 @@ function App() {
             
             if (telcoData.active_call && !verified) {
                 logApiPayload('in', '200 OK (Telco Response)', telcoData);
-                logAction(`📡 TELCO API: Appel GSM suspect détecté en arrière-plan.`, 'warn');
+                logAction(`📡 TELCO API: Appel GSM détecté en arrière-plan.`, 'warn');
                 
                 if (actionName === 'ASK_OTP') {
-                    setScamAlert(`ALERTE DE SÉCURITÉ\n\nNotre système détecte que vous êtes au téléphone.\n\nUn conseiller bancaire ne vous demandera JAMAIS un code OTP par téléphone. Raccrochez immédiatement, c'est une fraude.`);
+                    setCustomPrompt({
+                        title: 'Avertissement de sécurité',
+                        message: "Un appel est en cours sur votre téléphone.\n\nRappel : votre banque ne vous demandera JAMAIS de communiquer un code de sécurité par téléphone. Confirmez-vous cette demande ?",
+                        isDanger: true,
+                        onConfirm: () => {
+                            setCustomPrompt(null);
+                            setLocalFaceIdAction(actionName);
+                        }
+                    });
                     return;
                 }
                 
                 if (actionName === 'WIRE_TRANSFER') {
+                    // NOUVEAU : Message épuré et plus réaliste
                     setCustomPrompt({
-                        title: '⚠️ APPEL EN COURS DÉTECTÉ ⚠️',
-                        message: `Notre système détecte que vous êtes actuellement en communication téléphonique.\n\nRAPPEL : Ne faites JAMAIS de virement à la demande d'un interlocuteur (même s'il se dit de la banque ou de la police).\n\nEn continuant, vous confirmez que personne ne vous demande d'effectuer cette opération au téléphone.`,
-                        isDanger: true,
+                        title: 'Vérification de sécurité',
+                        message: "Un appel téléphonique est en cours sur votre appareil.\n\nPour protéger vos fonds contre les fraudes au faux conseiller, veuillez confirmer que vous êtes à l'initiative de ce virement et que personne ne vous guide par téléphone.",
+                        isDanger: false,
                         onConfirm: () => {
                             setCustomPrompt(null);
                             setPendingActionData({ amount: finalAmount });
@@ -326,19 +343,20 @@ function App() {
   }
 
   function proceedWithNormalActionFlow(actionName, finalAmount, isNewBen) {
+    // Si la vérification est OK mais que le client fait n'importe quoi sous les yeux du conseiller légitime
     if (verified === true) {
       if (actionName === 'ASK_OTP') {
-          setScamAlert(`ALERTE FRAUDE\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. S'il vous le demande, c'est un fraudeur.\n\nRACCROCHEZ IMMÉDIATEMENT.`);
+          setScamAlert(`ALERTE\n\nUn conseiller n'a JAMAIS besoin de vous demander un code OTP. Si on vous le demande, c'est une fraude.\n\nRACCROCHEZ.`);
           return;
       }
       if (actionName === 'WIRE_TRANSFER' && isNewBen) {
-          setScamAlert(`ALERTE FRAUDE\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne. C'est la méthode n°1 des fraudeurs.\n\nRACCROCHEZ.`);
+          setScamAlert(`ALERTE\n\nVous tentez d'ajouter un bénéficiaire alors qu'un conseiller est en ligne. C'est une méthode de fraude courante.\n\nAction bloquée par sécurité.`);
           return;
       }
       if (actionName === 'WIRE_TRANSFER') { 
           setCustomPrompt({
-              title: '⚠️ TRANSACTION SOUS HAUTE SÉCURITÉ ⚠️',
-              message: `Un conseiller n'a PAS le droit de vous demander d'exécuter un virement.\n\nSi votre interlocuteur actuel vous le demande, raccrochez, c'est une fraude.\n\nPour continuer, vous devez confirmer être le seul à l'initiative de ce virement.`,
+              title: 'Transaction Sécurisée',
+              message: `Un conseiller n'a pas le droit de vous demander d'exécuter un virement.\n\nPour continuer, vous devez confirmer être le seul à l'initiative de ce virement.`,
               isDanger: true,
               onConfirm: () => {
                   setCustomPrompt(null);
@@ -352,27 +370,9 @@ function App() {
       return;
     }
 
-    let specificWarning = "";
-    if (actionName === 'WIRE_TRANSFER') {
-        specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de faire un virement.\n\n";
-    } else if (actionName === 'ASK_OTP') {
-        specificWarning = "Un conseiller n'a pas le droit et ne vous demandera JAMAIS de lui dicter un code OTP.\n\n";
-    }
-    
-    if (consortiumAlert) {
-        specificWarning = "🔴 DANGER : Notre réseau de sécurité a détecté une activité suspecte récente concernant votre appareil.\n\n" + specificWarning;
-    }
-
-    setCustomPrompt({
-        title: consortiumAlert ? 'ALERTE RÉSEAU CASTOR' : 'VÉRIFICATION DE SÉCURITÉ',
-        message: `RAPPEL : Les vrais conseillers sont toujours authentifiés en haut de l'écran par l'application.\n\n${specificWarning}Êtes-vous sûr de vouloir continuer ?`,
-        isDanger: consortiumAlert,
-        onConfirm: () => {
-            setCustomPrompt(null);
-            if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
-            setLocalFaceIdAction(actionName);
-        }
-    });
+    // Le flux normal "sans appel et sans alerte". Pas de pop-up agressive inutile.
+    setLocalFaceIdAction(actionName);
+    if (actionName === 'WIRE_TRANSFER') setPendingActionData({ amount: finalAmount });
   }
 
   function openAppFromHome() {
@@ -417,7 +417,7 @@ function App() {
   else if (localFaceIdAction === 'REPORT_LOST') faceIdMessage = "Confirmer l'opposition définitive ?";
   else if (localFaceIdAction === 'FREEZE_CARD') faceIdMessage = "Confirmer le blocage de la carte ?";
   else if (localFaceIdAction === 'UNFREEZE_CARD') faceIdMessage = "Confirmer le déblocage de la carte ?";
-  else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer être à l'initiative de ce virement de ${pendingActionData.amount.toFixed(2)} € ?`;
+  else if (localFaceIdAction === 'WIRE_TRANSFER' && pendingActionData) faceIdMessage = `Confirmer le virement de ${pendingActionData.amount.toFixed(2)} € ?`;
   else if (localFaceIdAction === 'ASK_OTP') faceIdMessage = "Confirmer la génération d'un code OTP ?";
 
   return e('div', { className: 'demo-container' },
@@ -425,11 +425,12 @@ function App() {
     e('div', { className: 'mobile-wrapper' },
       e('div', { className: 'mobile-device' },
         
+        // Appel Sécurisé Castor
         incomingCallParams && e('div', { className: 'incoming-call-screen' },
           e('div', { className: 'call-info' },
             e('div', { className: 'call-avatar' }, Icon('person')),
             e('h3', { className: 'call-name' }, actorName === 'Agent IA' ? '01 42 14 55 22' : 'Service Client'),
-            e('p', { className: 'call-type' }, 'Appel entrant...')
+            e('p', { className: 'call-type' }, 'Appel sécurisé entrant...')
           ),
           e('div', { className: 'call-actions' },
             e('div', { className: 'call-btn-wrapper' }, e('button', { className: 'call-btn decline', onClick: declineCall }, Icon('call_end')), e('span', { className: 'call-btn-label' }, 'Refuser')),
@@ -437,8 +438,21 @@ function App() {
           )
         ),
 
+        // NOUVEAU: Appel GSM Inconnu / Fraudeur
+        incomingExternalCall && e('div', { className: 'incoming-call-screen', style: { background: 'rgba(25, 30, 35, 0.95)' } },
+          e('div', { className: 'call-info' },
+            e('div', { className: 'call-avatar', style: { background: 'var(--danger)' } }, Icon('question_mark')),
+            e('h3', { className: 'call-name' }, '06 45 89 23 11'),
+            e('p', { className: 'call-type' }, 'Appel entrant (Inconnu)...')
+          ),
+          e('div', { className: 'call-actions' },
+            e('div', { className: 'call-btn-wrapper' }, e('button', { className: 'call-btn decline', onClick: () => setIncomingExternalCall(false) }, Icon('call_end')), e('span', { className: 'call-btn-label' }, 'Refuser')),
+            e('div', { className: 'call-btn-wrapper' }, e('button', { className: 'call-btn accept', onClick: () => { setIncomingExternalCall(false); setExternalCallState(true); } }, Icon('call')), e('span', { className: 'call-btn-label' }, 'Décrocher'))
+          )
+        ),
+
         deviceView === 'OS_HOME' && e('div', { className: 'phone-home' },
-          (isPhoneCallActive || externalGsmCallActive) && e('div', { className: `active-call-pill ${externalGsmCallActive ? 'danger' : ''}` }, Icon('call'), externalGsmCallActive ? 'Appel Externe' : '00:12'),
+          (isPhoneCallActive || externalGsmCallActive) && e('div', { className: `active-call-pill ${externalGsmCallActive ? 'danger' : ''}` }, Icon('call'), externalGsmCallActive ? 'Appel Externe (Inconnu)' : '00:12'),
           e('div', { className: 'os-clock', style: { marginTop: (isPhoneCallActive || externalGsmCallActive) ? '2rem' : '0'} }, currentTime),
           
           hasPushNotif && e('div', { className: 'os-push', onClick: openAppFromHome },
@@ -484,8 +498,9 @@ function App() {
               e('button', { className: 'end-call-btn', onClick: resetState }, Icon('call_end'))
             ),
 
-            consortiumAlert && !verified && e('div', { className: 'call-banner', style: { backgroundColor: '#ff9800', color: '#000', fontSize: '0.8rem', padding: '0.75rem' } }, 
-              e('div', { style: { display: 'flex', alignItems: 'center', gap: '0.5rem' } }, Icon('radar'), `Réseau Castor : Activité frauduleuse suspectée sur ce téléphone.`)
+            // NOUVEAU : Bandeau Consortium omniprésent et sérieux (style Lockdown Bancaire)
+            consortiumAlert && !verified && e('div', { style: { background: 'var(--danger)', color: 'white', padding: '0.75rem 1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.85rem', fontWeight: 600, boxShadow: '0 4px 12px rgba(255, 59, 48, 0.3)', zIndex: 100 } }, 
+              Icon('gavel'), 'Appareil restreint (Alerte Consortium)'
             ),
 
             e('div', { className: 'mobile-content' },
@@ -500,10 +515,10 @@ function App() {
               ),
 
               e('div', { className: 'action-grid' },
-                e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon'}, Icon('sync_alt')), 'Virement'),
+                e('button', { className: 'action-btn', onClick: () => setActivePage('TRANSFER') }, e('div', {className: 'icon', style: consortiumAlert ? {color: 'var(--danger)'} : {}}, Icon('sync_alt')), 'Virement'),
                 e('button', { className: 'action-btn', onClick: () => setActivePage('CARD') }, e('div', {className: 'icon'}, Icon('credit_card')), 'Ma Carte'),
                 e('button', { className: 'action-btn', onClick: () => handleUserAction('DISCUSS_CASE') }, e('div', {className: 'icon'}, Icon('chat')), 'Message'),
-                e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon'}, Icon('key')), 'Code (OTP)')
+                e('button', { className: 'action-btn', onClick: () => handleUserAction('ASK_OTP') }, e('div', {className: 'icon', style: consortiumAlert ? {color: 'var(--danger)'} : {}}, Icon('key')), 'Code (OTP)')
               ),
               
               e('h3', { style: { fontSize: '1rem', marginTop: '1.5rem', marginBottom: '1rem' } }, 'Opérations récentes'),
@@ -656,7 +671,9 @@ function App() {
           ),
           e('div', { className: 'row', style: { borderTop: '1px solid #eee', paddingTop: '1rem', flexWrap: 'wrap', gap: '0.5rem' } },
             e('button', { className: `control-btn ${consortiumAlert ? 'danger' : 'warning'}`, onClick: toggleConsortiumAlert, style: { flex: 1, justifyContent: 'center'} }, Icon('radar'), consortiumAlert ? "Retirer l'Alerte Consortium" : "Simuler Alerte Consortium"),
-            e('button', { className: `control-btn ${externalGsmCallActive ? 'danger' : 'warning'}`, onClick: toggleExternalGsmCall, style: { flex: 1, justifyContent: 'center'} }, Icon('cell_tower'), externalGsmCallActive ? "Raccrocher GSM Fraudeur" : "Simuler Appel GSM Externe (Telco API)")
+            
+            // NOUVEAU BOUTON : Déclenche l'UI d'appel GSM Externe au lieu de l'activer en silence
+            e('button', { className: `control-btn ${externalGsmCallActive ? 'danger' : 'warning'}`, onClick: () => externalGsmCallActive ? setExternalCallState(false) : setIncomingExternalCall(true), style: { flex: 1, justifyContent: 'center'} }, Icon('cell_tower'), externalGsmCallActive ? "Raccrocher GSM Fraudeur" : "Simuler Appel GSM Externe (Telco)")
           )
         ),
 
