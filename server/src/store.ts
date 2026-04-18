@@ -29,8 +29,11 @@ export const interactions = new Map<string, Interaction>();
 export const confirmations = new Map<string, Confirmation>();
 export const audit_events: AuditEvent[] = [];
 
-// NOUVEAU : Stockage des connexions temps réel (Server-Sent Events)
+// Stockage des connexions temps réel (Server-Sent Events)
 export const clients = new Map<string, Set<ServerResponse>>();
+
+// État de simulation de l'API Telco (GSMA Open Gateway)
+export let telco_state = { active_call: false };
 
 export function broadcast(interaction_id: string, event: Record<string, unknown>) {
   const subs = clients.get(interaction_id);
@@ -44,6 +47,10 @@ export function pushAudit(type: string, payload: Record<string, unknown>) {
   audit_events.push({ type, at: Date.now(), payload });
 }
 
+export function setTelcoState(active: boolean) {
+  telco_state.active_call = active;
+}
+
 export function resetStore() {
   interactions.clear();
   confirmations.clear();
@@ -52,4 +59,6 @@ export function resetStore() {
     for (const res of subs) res.end();
   }
   clients.clear();
+  telco_state.active_call = false;
 }
+
