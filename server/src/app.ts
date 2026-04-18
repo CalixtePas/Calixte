@@ -1,9 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { confirmations, interactions, pushAudit, clients, broadcast, type ActorType, type Decision } from './store.ts';
+import { confirmations, interactions, pushAudit, clients, broadcast, telco_state, setTelcoState, type ActorType, type Decision } from './store.ts';
 import { getJwks, signToken } from './jwt.ts';
 
-// NOUVEAU NOM DE L'API
 const PREFIX = '/castor/v1';
 
 type Json = Record<string, unknown>;
@@ -77,7 +76,6 @@ export function buildServer() {
         cannot: ['ASK_OTP', 'WIRE_TRANSFER', 'SHARE_SECRETS']
       };
 
-      // NOUVEAU NOM DE L'ÉMETTEUR (iss: 'castor')
       const token = signToken({ iss: 'castor', sub: interaction_id, aud: body.audience_ref, iat: now, exp: now + 10 * 60, actor_type: body.actor_type, intent: body.intent, summary });
       pushAudit('interaction.start', { interaction_id });
       return send(res, 200, { interaction_id, token, summary });
@@ -110,6 +108,19 @@ export function buildServer() {
       confirmation.status = 'APPROVED';
       broadcast(confirmation.interaction_id, { type: 'APPROVED', action_id: id });
       return send(res, 200, { status: 'APPROVED' });
+    }
+
+    // Routes API Telco ajoutées
+    if (req.method === 'GET' && req.url?.startsWith(`${PREFIX}/telco/call-status`)) {
+      return send(res, 200, { active_call: telco_state.active_call, network: 'Orange FR' });
+    }
+
+    if (req.method === 'POST' && req.url === `${PREFIX}/admin/telco-status`) {
+      const body = (await readBody(req)) as { active_call?: boolean };
+      if (typeof body.active_call === 'boolean') {
+        setTelcoState(body.active_call);
+      }
+      return send(res, 200, { active_call: telco_state.active_call });
     }
 
     return send(res, 404, { error: 'Not found' });
